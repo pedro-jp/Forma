@@ -310,10 +310,16 @@ public class AuthService {
             try {
                 String safeName = (name != null && !name.isBlank()) ? name.trim() : "atleta";
                 String htmlEmail = buildStyledRecoveryEmailHtml(safeName, code);
+                String plainTextEmail = "Olá, " + safeName + "!\n\n"
+                    + "Use o código abaixo no aplicativo Forma para redefinir sua senha:\n\n"
+                    + code + "\n\n"
+                    + "Este código é válido por 15 minutos.\n"
+                    + "Se você não solicitou esta alteração, ignore este e-mail.";
                 String jsonBody = new ObjectMapper().writeValueAsString(Map.of(
                     "from", fromAddress,
                     "to", List.of(email.trim()),
-                    "subject", "Código de recuperação Forma: " + code,
+                    "subject", "Seu código de acesso Forma: " + code,
+                    "text", plainTextEmail,
                     "html", htmlEmail
                 ));
 
@@ -347,54 +353,40 @@ public class AuthService {
             <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Recuperação de Senha • Forma</title>
+              <meta name="color-scheme" content="dark">
+              <meta name="supported-color-schemes" content="dark">
+              <style>
+                u + .body .gm-screen { background: #000000; mix-blend-mode: screen; }
+                u + .body .gm-diff { background: #000000; mix-blend-mode: difference; }
+              </style>
             </head>
-            <body style="margin:0;padding:0;background-color:#0B0F12;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Rounded','Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#FFFFFF;">
-              <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0B0F12;padding:36px 16px;">
-                <tr>
-                  <td align="center">
-                    <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="max-width:480px;background-color:#11161A;border-radius:24px;border:1px solid #1E2930;overflow:hidden;box-shadow:0 20px 45px rgba(0,0,0,0.45);">
-                      <tr>
-                        <td style="height:5px;background:linear-gradient(90deg,#54E1C3 0%%,#D4F782 100%%);"></td>
-                      </tr>
-                      <tr>
-                        <td align="center" style="padding:36px 32px 20px 32px;">
-                          <img src="https://forma-94vp.onrender.com/logo.png" alt="Forma" width="68" height="68" style="display:block;width:68px;height:68px;border-radius:18px;box-shadow:0 8px 24px rgba(84,225,195,0.28);margin-bottom:14px;" />
-                          <div style="font-size:28px;font-weight:800;letter-spacing:-0.5px;color:#FFFFFF;margin:0;">Forma</div>
-                          <div style="font-size:13px;font-weight:500;color:#8A99A4;margin-top:4px;">Nutrição &amp; Treinos Inteligentes</div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="padding:8px 32px 28px 32px;">
-                          <p style="font-size:16px;line-height:1.55;color:#E6EDF2;margin:0 0 12px 0;">Olá, <strong style="color:#54E1C3;">%s</strong>!</p>
-                          <p style="font-size:14px;line-height:1.6;color:#9BA9B4;margin:0 0 24px 0;">Recebemos uma solicitação para redefinir a senha da sua conta no <strong style="color:#FFFFFF;">Forma</strong>. Digite o código de verificação abaixo no aplicativo:</p>
-                          <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="background-color:#183C36;border:1px solid rgba(84,225,195,0.45);border-radius:18px;margin-bottom:22px;">
-                            <tr>
-                              <td align="center" style="padding:22px 16px;">
-                                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.6px;color:#D4F782;margin-bottom:8px;">Código de Verificação</div>
-                                <div style="font-size:36px;font-weight:800;letter-spacing:8px;color:#54E1C3;font-family:'SF Mono',Menlo,Consolas,monospace;">%s</div>
-                              </td>
-                            </tr>
-                          </table>
-                          <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="background-color:#161D22;border-radius:14px;margin-bottom:20px;">
-                            <tr>
-                              <td style="padding:14px 16px;font-size:13px;line-height:1.5;color:#A5B4BF;">
-                                ⏱️ Este código é válido por <strong style="color:#D4F782;">15 minutos</strong> e expira automaticamente após o uso.
-                              </td>
-                            </tr>
-                          </table>
-                          <p style="font-size:12px;line-height:1.5;color:#6E7D88;margin:0;text-align:center;">Se você não solicitou a redefinição de senha, pode ignorar este e-mail com segurança — sua conta permanece protegida.</p>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td align="center" style="padding:18px 32px;background-color:#0D1215;border-top:1px solid #1A2228;font-size:11px;color:#5C6B75;">
-                          © 2026 Forma • Saúde, Nutrição e Hipertrofia Inteligente
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
+            <body class="body" style="margin:0;padding:0;background-color:#0B0F12;background-image:linear-gradient(#0B0F12,#0B0F12);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+              <div style="background-color:#0B0F12;background-image:linear-gradient(#0B0F12,#0B0F12);padding:28px 14px;">
+                <div style="max-width:440px;margin:0 auto;background-color:#11161A;background-image:linear-gradient(#11161A,#11161A);border-radius:22px;border:1px solid #223038;overflow:hidden;">
+                  <div style="height:4px;background-color:#54E1C3;background-image:linear-gradient(90deg,#54E1C3 0%%,#D4F782 100%%);"></div>
+                  <div style="padding:28px 26px 26px 26px;text-align:center;">
+                    <div style="width:56px;height:56px;margin:0 auto 12px auto;border-radius:16px;background-color:#183C36;background-image:linear-gradient(135deg,#54E1C3 0%%,#D4F782 100%%);line-height:56px;text-align:center;">
+                      <span style="font-size:28px;font-weight:900;color:#0B0F12;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">F</span>
+                    </div>
+                    <div class="gm-screen"><div class="gm-diff" style="color:#FFFFFF;">
+                      <div style="font-size:24px;font-weight:800;letter-spacing:-0.4px;margin:0;">Forma</div>
+                      <div style="font-size:12px;color:#B0BEC5;margin-top:3px;margin-bottom:22px;">Nutrição &amp; Treinos Inteligentes</div>
+                      <div style="text-align:left;font-size:15px;line-height:1.55;margin-bottom:10px;">Olá, <strong>%s</strong>!</div>
+                      <div style="text-align:left;font-size:14px;line-height:1.55;color:#CFD8DC;margin-bottom:22px;">Use o código de 6 dígitos abaixo no aplicativo <strong>Forma</strong> para redefinir sua senha:</div>
+                    </div></div>
+                    <div style="background-color:#183C36;background-image:linear-gradient(135deg,#183C36 0%%,#112A26 100%%);border:1px solid #54E1C3;border-radius:16px;padding:18px 14px;margin-bottom:18px;">
+                      <div class="gm-screen"><div class="gm-diff" style="color:#FFFFFF;">
+                        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.8px;color:#CFD8DC;margin-bottom:6px;">Código de Verificação</div>
+                        <div style="font-size:34px;font-weight:800;letter-spacing:7px;font-family:'SF Mono',Menlo,Consolas,monospace;">%s</div>
+                      </div></div>
+                    </div>
+                    <div class="gm-screen"><div class="gm-diff" style="color:#FFFFFF;">
+                      <div style="font-size:12px;line-height:1.5;color:#B0BEC5;margin-bottom:14px;">Válido por <strong>15 minutos</strong>.</div>
+                      <div style="font-size:11px;line-height:1.45;color:#90A4AE;">Se você não solicitou esta alteração, basta ignorar esta mensagem.</div>
+                    </div></div>
+                  </div>
+                </div>
+              </div>
             </body>
             </html>
             """.formatted(userName, code);
