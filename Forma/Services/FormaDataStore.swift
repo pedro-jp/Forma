@@ -795,8 +795,17 @@ public final class FormaDataStore {
         let pending = WidgetDataManager.shared.drainPendingWater()
         if pending > 0 {
             let entry = WaterEntry(milliliters: pending, date: Date())
-            Task { @MainActor in
-                try? await self.insertWaterEntryRemoteFirst(entry)
+            mainContext.insert(entry)
+            try? mainContext.save()
+            if !isInMemoryStore {
+                AppActivityLogManager.shared.logWater(
+                    id: entry.id.uuidString,
+                    milliliters: entry.milliliters,
+                    date: entry.date
+                )
+                Task { @MainActor in
+                    try? await BackendSyncManager.shared.pushWaterRemoteFirst(entry)
+                }
             }
         }
     }

@@ -28,6 +28,7 @@ public struct AddWaterWidgetIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult {
         WidgetDataManager.shared.addWater(milliliters: milliliters)
+        FormaDataStore.shared.syncTodayData()
         return .result()
     }
 }

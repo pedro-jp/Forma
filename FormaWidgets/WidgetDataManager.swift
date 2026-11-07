@@ -129,6 +129,9 @@ public final class WidgetDataManager: Sendable {
     public static let storageKey = "widget_calorie_data"
     public static let jsonFileName = "widget_calorie_data.json"
     public static let pendingWaterKey = "pending_water_ml"
+    public static let lastWaterTapEpochMsKey = "last_widget_water_tap_epoch_ms"
+    public static let waterTapLockFileName = "widget_water_tap.lock"
+    private static let duplicateTapCooldownMs: Int64 = 1200
     
     private init() {}
     
@@ -141,7 +144,46 @@ public final class WidgetDataManager: Sendable {
             .appendingPathComponent(Self.jsonFileName)
     }
     
+    private var waterTapLockFileURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupId)?
+            .appendingPathComponent(Self.waterTapLockFileName)
+    }
+    
+    /// Verifica e grava atomicamente o timestamp do toque no App Group para evitar disparo duplo
+    /// (ex: Continuity Widget no Mac disparando a Intent duas vezes seguidas em < 1.2s).
+    private func shouldAcceptWaterTap(nowMs: Int64) -> Bool {
+        var lastTapMs: Int64 = 0
+        if let shared = sharedDefaults {
+            let stored = Int64(shared.double(forKey: Self.lastWaterTapEpochMsKey))
+            if stored > lastTapMs { lastTapMs = stored }
+        }
+        if let lockURL = waterTapLockFileURL,
+           let content = try? String(contentsOf: lockURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           let fileMs = Int64(content),
+           fileMs > lastTapMs {
+            lastTapMs = fileMs
+        }
+        
+        if lastTapMs > 0 && (nowMs - lastTapMs) >= 0 && (nowMs - lastTapMs) < Self.duplicateTapCooldownMs {
+            return false
+        }
+        
+        if let shared = sharedDefaults {
+            shared.set(Double(nowMs), forKey: Self.lastWaterTapEpochMsKey)
+            shared.synchronize()
+        }
+        if let lockURL = waterTapLockFileURL {
+            try? "\(nowMs)".data(using: .utf8)?.write(to: lockURL, options: .atomic)
+        }
+        return true
+    }
+    
     public func addWater(milliliters: Int = 250) {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+        guard shouldAcceptWaterTap(nowMs: nowMs) else {
+            return
+        }
+        
         var current = loadWidgetData()
         current.waterConsumed += milliliters
         current.lastUpdated = Date()
