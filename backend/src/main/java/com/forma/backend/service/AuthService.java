@@ -39,17 +39,20 @@ public class AuthService {
     private final UserProfileRepository userProfileRepository;
     private final JwtService jwtService;
     private final SocialAuthVerificationService socialAuthVerificationService;
+    private final AppConfigService appConfigService;
 
     public AuthService(
         UserRepository userRepository,
         UserProfileRepository userProfileRepository,
         JwtService jwtService,
-        SocialAuthVerificationService socialAuthVerificationService
+        SocialAuthVerificationService socialAuthVerificationService,
+        AppConfigService appConfigService
     ) {
         this.userRepository = userRepository;
         this.userProfileRepository = userProfileRepository;
         this.jwtService = jwtService;
         this.socialAuthVerificationService = socialAuthVerificationService;
+        this.appConfigService = appConfigService;
     }
 
     @Transactional
@@ -288,13 +291,16 @@ public class AuthService {
     }
 
     private void dispatchRecoveryEmailOrLog(String email, String name, String code) {
-        String resendKey = System.getenv("RESEND_API_KEY");
-        if (resendKey == null || resendKey.isBlank()) {
-            resendKey = System.getProperty("RESEND_API_KEY", "");
+        String resendKey = appConfigService != null ? appConfigService.getResendApiKey() : "";
+        if (resendKey.isBlank()) {
+            resendKey = System.getenv("RESEND_API_KEY");
+            if (resendKey == null || resendKey.isBlank()) {
+                resendKey = System.getProperty("RESEND_API_KEY", "");
+            }
         }
         String fromAddress = System.getenv("MAIL_FROM");
         if (fromAddress == null || fromAddress.isBlank()) {
-            fromAddress = "Forma <onboarding@resend.dev>";
+            fromAddress = System.getProperty("MAIL_FROM", "Forma <onboarding@resend.dev>");
         }
 
         if (!resendKey.isBlank()) {
@@ -318,9 +324,13 @@ public class AuthService {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
                     .build();
-                client.send(req, HttpResponse.BodyHandlers.discarding());
-                log.info("[Auth] E-mail de recuperação enviado para {}", email);
-                return;
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    log.info("[Auth] E-mail de recuperação enviado via Resend para {} (HTTP {})", email, resp.statusCode());
+                    return;
+                } else {
+                    log.warn("[Auth] Resend retornou HTTP {} para {}: {}", resp.statusCode(), email, resp.body());
+                }
             } catch (Exception e) {
                 log.warn("[Auth] Falha ao enviar e-mail via Resend ({}), registrando no log local.", e.getMessage());
             }
