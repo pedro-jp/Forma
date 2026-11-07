@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255),
     auth_provider VARCHAR(50) NOT NULL DEFAULT 'EMAIL',
     provider_id VARCHAR(255),
+    apple_refresh_token VARCHAR(1024),
+    google_refresh_token VARCHAR(1024),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     last_login_at TIMESTAMPTZ,
     last_synced_at TIMESTAMPTZ,

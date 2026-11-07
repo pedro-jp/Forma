@@ -57,6 +57,9 @@ public class User {
     @Column(name = "apple_refresh_token", length = 1024)
     private String appleRefreshToken;
 
+    @Column(name = "google_refresh_token", length = 1024)
+    private String googleRefreshToken;
+
     public User() {}
 
     public User(String email, String name, String authProvider, String providerId) {
@@ -119,4 +122,7 @@ public class User {
 
     public String getAppleRefreshToken() { return appleRefreshToken; }
     public void setAppleRefreshToken(String appleRefreshToken) { this.appleRefreshToken = appleRefreshToken; }
+
+    public String getGoogleRefreshToken() { return googleRefreshToken; }
+    public void setGoogleRefreshToken(String googleRefreshToken) { this.googleRefreshToken = googleRefreshToken; }
 }

@@ -136,6 +136,27 @@ public class AppConfigService {
         return getConfigOrEnv(KEY_APPLE_PRIVATE_KEY, "");
     }
 
+    public void setAppleAuthConfig(String teamId, String keyId, String privateKeyPem) {
+        if (teamId != null) {
+            AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_TEAM_ID)
+                .orElse(new AppConfigEntity(KEY_APPLE_TEAM_ID, DEFAULT_APPLE_TEAM_ID, "Apple Team ID"));
+            e.setConfigValue(teamId.trim());
+            appConfigRepository.save(e);
+        }
+        if (keyId != null) {
+            AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_KEY_ID)
+                .orElse(new AppConfigEntity(KEY_APPLE_KEY_ID, "", "Apple Sign-In Key ID"));
+            e.setConfigValue(keyId.trim());
+            appConfigRepository.save(e);
+        }
+        if (privateKeyPem != null) {
+            AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_PRIVATE_KEY)
+                .orElse(new AppConfigEntity(KEY_APPLE_PRIVATE_KEY, "", "Apple Sign-In .p8 Private Key"));
+            e.setConfigValue(privateKeyPem.trim());
+            appConfigRepository.save(e);
+        }
+    }
+
     private String getConfigOrEnv(String key, String fallback) {
         String dbValue = appConfigRepository.findById(key)
             .map(AppConfigEntity::getConfigValue)

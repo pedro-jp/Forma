@@ -260,18 +260,38 @@ public class AdminUserService {
 
     @Transactional
     public void deleteUserPermanently(UUID userId) {
-        deleteUserPermanently(userId, null);
+        deleteUserPermanently(userId, null, null);
     }
 
     @Transactional
     public void deleteUserPermanently(UUID userId, String appleAuthorizationCode) {
+        deleteUserPermanently(userId, appleAuthorizationCode, null);
+    }
+
+    @Transactional
+    public void deleteUserPermanently(UUID userId, String appleAuthorizationCode, String googleToken) {
         User user = findUserOrThrow(userId);
 
-        if ("APPLE".equalsIgnoreCase(user.getAuthProvider()) && socialAuthVerificationService != null) {
-            socialAuthVerificationService.revokeAppleTokensOnAccountDeletion(
-                user.getAppleRefreshToken(),
-                appleAuthorizationCode
-            );
+        if (socialAuthVerificationService != null) {
+            boolean hasAppleLink = "APPLE".equalsIgnoreCase(user.getAuthProvider())
+                || (user.getAppleRefreshToken() != null && !user.getAppleRefreshToken().isBlank())
+                || (appleAuthorizationCode != null && !appleAuthorizationCode.isBlank());
+            if (hasAppleLink) {
+                socialAuthVerificationService.revokeAppleTokensOnAccountDeletion(
+                    user.getAppleRefreshToken(),
+                    appleAuthorizationCode
+                );
+            }
+
+            boolean hasGoogleLink = "GOOGLE".equalsIgnoreCase(user.getAuthProvider())
+                || (user.getGoogleRefreshToken() != null && !user.getGoogleRefreshToken().isBlank())
+                || (googleToken != null && !googleToken.isBlank());
+            if (hasGoogleLink) {
+                socialAuthVerificationService.revokeGoogleTokensOnAccountDeletion(
+                    user.getGoogleRefreshToken(),
+                    googleToken
+                );
+            }
         }
 
         foodEntryRepository.deleteByUserId(userId);

@@ -23,8 +23,23 @@ public class AuthDto {
         String nonce,          // Nonce original para prevenção de replay attacks no Sign in with Apple
         Boolean isRegisterIntent,
         Boolean confirmExisting,
-        String authorizationCode // Código OAuth efêmero da Apple para troca/revogação (Guideline 5.1.1(v))
+        String authorizationCode, // Código OAuth efêmero da Apple para troca/revogação (Guideline 5.1.1(v))
+        String oauthRefreshToken  // Refresh/Access token OAuth do Google para revogação na exclusão de conta
     ) {
+        public SocialLoginRequest(
+            String provider,
+            String idToken,
+            String email,
+            String name,
+            String providerId,
+            String nonce,
+            Boolean isRegisterIntent,
+            Boolean confirmExisting,
+            String authorizationCode
+        ) {
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, authorizationCode, null);
+        }
+
         public SocialLoginRequest(
             String provider,
             String idToken,
@@ -35,7 +50,7 @@ public class AuthDto {
             Boolean isRegisterIntent,
             Boolean confirmExisting
         ) {
-            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, null);
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, null, null);
         }
 
         public SocialLoginRequest(
@@ -46,15 +61,19 @@ public class AuthDto {
             String providerId,
             String nonce
         ) {
-            this(provider, idToken, email, name, providerId, nonce, false, true, null);
+            this(provider, idToken, email, name, providerId, nonce, false, true, null, null);
         }
 
         public SocialLoginRequest(String provider, String idToken, String email, String name, String providerId) {
-            this(provider, idToken, email, name, providerId, null, false, true, null);
+            this(provider, idToken, email, name, providerId, null, false, true, null, null);
         }
     }
 
-    public record DeleteAccountRequest(String authorizationCode) {}
+    public record DeleteAccountRequest(String authorizationCode, String googleToken) {
+        public DeleteAccountRequest(String authorizationCode) {
+            this(authorizationCode, null);
+        }
+    }
 
     public record AuthResponse(
         String token,

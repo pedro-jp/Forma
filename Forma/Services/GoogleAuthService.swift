@@ -78,16 +78,37 @@ public final class GoogleAuthService: NSObject, ASWebAuthenticationPresentationC
         return "forma"
     }
     
+    private static let googleOAuthTokenKey = "forma_google_oauth_token"
+
+    public var storedOAuthToken: String? {
+        KeychainHelper.shared.loadString(key: Self.googleOAuthTokenKey)
+    }
+
+    public func clearStoredOAuthToken() {
+        KeychainHelper.shared.delete(key: Self.googleOAuthTokenKey)
+    }
+
     private var authSession: ASWebAuthenticationSession?
     
     public struct GoogleUserResult {
         public let idToken: String
+        public let refreshToken: String?
+        public let accessToken: String?
         public let sub: String?
         public let email: String?
         public let name: String?
         
-        public init(idToken: String, sub: String?, email: String?, name: String?) {
+        public init(
+            idToken: String,
+            refreshToken: String? = nil,
+            accessToken: String? = nil,
+            sub: String?,
+            email: String?,
+            name: String?
+        ) {
             self.idToken = idToken
+            self.refreshToken = refreshToken
+            self.accessToken = accessToken
             self.sub = sub
             self.email = email
             self.name = name
@@ -233,13 +254,26 @@ public final class GoogleAuthService: NSObject, ASWebAuthenticationPresentationC
               let idToken = json["id_token"] as? String, !idToken.isEmpty else {
             throw NSError(domain: "GoogleAuth", code: 500, userInfo: [NSLocalizedDescriptionKey: "ID Token não retornado pelo Google."])
         }
+
+        let refreshToken = (json["refresh_token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let accessToken = (json["access_token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let revocable = (refreshToken?.isEmpty == false ? refreshToken : accessToken), !revocable.isEmpty {
+            KeychainHelper.shared.save(key: Self.googleOAuthTokenKey, string: revocable)
+        }
         
         let claims = Self.decodeJwtClaims(idToken)
         let sub = claims["sub"] as? String
         let email = claims["email"] as? String
         let name = claims["name"] as? String
         
-        return GoogleUserResult(idToken: idToken, sub: sub, email: email, name: name)
+        return GoogleUserResult(
+            idToken: idToken,
+            refreshToken: refreshToken,
+            accessToken: accessToken,
+            sub: sub,
+            email: email,
+            name: name
+        )
     }
     
     // MARK: - Geradores de PKCE (RFC 7636)

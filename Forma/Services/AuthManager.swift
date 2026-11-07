@@ -10,6 +10,65 @@ import Combine
 import SwiftUI
 import SwiftData
 import AuthenticationServices
+import UIKit
+
+@MainActor
+private final class AppleDeletionAuthorizationCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    private var continuation: CheckedContinuation<String?, Error>?
+
+    func requestAuthorizationCode() async throws -> String? {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let provider = ASAuthorizationAppleIDProvider()
+            let request = provider.createRequest()
+            request.requestedScopes = []
+
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            controller.performRequests()
+        }
+    }
+
+    nonisolated func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        MainActor.assumeIsolated {
+            let scenes = UIApplication.shared.connectedScenes
+            let windowScene = scenes.compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive }
+                ?? scenes.compactMap { $0 as? UIWindowScene }.first
+            if let window = windowScene?.windows.first(where: { $0.isKeyWindow }) ?? windowScene?.windows.first {
+                return window
+            }
+            guard let scene = windowScene else {
+                preconditionFailure("Nenhuma UIWindowScene ativa disponível para confirmação Apple.")
+            }
+            return UIWindow(windowScene: scene)
+        }
+    }
+
+    nonisolated func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        let code = (authorization.credential as? ASAuthorizationAppleIDCredential)?
+            .authorizationCode
+            .flatMap { String(data: $0, encoding: .utf8) }
+        Task { @MainActor in
+            self.continuation?.resume(returning: code)
+            self.continuation = nil
+        }
+    }
+
+    nonisolated func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        let nsError = error as NSError
+        Task { @MainActor in
+            if nsError.domain == ASAuthorizationError.errorDomain,
+               nsError.code == ASAuthorizationError.canceled.rawValue {
+                self.continuation?.resume(throwing: CancellationError())
+            } else {
+                // Em builds locais Debug sem capability paga ativa, segue com o refresh_token salvo no backend
+                self.continuation?.resume(returning: nil)
+            }
+            self.continuation = nil
+        }
+    }
+}
 
 @MainActor
 public final class AuthManager: ObservableObject {
@@ -21,6 +80,8 @@ public final class AuthManager: ObservableObject {
     private let userEmailKey = "forma_user_email"
     private let userNameKey = "forma_user_name"
     private let authProviderKey = "forma_auth_provider"
+    private let socialProviderIdKey = "forma_social_provider_id"
+    private var appleDeletionCoordinator: AppleDeletionAuthorizationCoordinator?
 
     // MARK: - Endereços de Rede Local / Bonjour / Simulador (Lê BACKEND_BASE_URL do Secrets.plist primeiro)
     public static var configuredPlistUrl: String? {
@@ -241,7 +302,8 @@ public final class AuthManager: ObservableObject {
         nonce: String? = nil,
         isRegisterIntent: Bool = false,
         confirmExisting: Bool = true,
-        authorizationCode: String? = nil
+        authorizationCode: String? = nil,
+        oauthRefreshToken: String? = nil
     ) async throws {
         isAuthenticating = true
         errorMessage = nil
@@ -258,6 +320,7 @@ public final class AuthManager: ObservableObject {
         if let idToken, !idToken.isEmpty { body["idToken"] = idToken }
         if let nonce, !nonce.isEmpty { body["nonce"] = nonce }
         if let authorizationCode, !authorizationCode.isEmpty { body["authorizationCode"] = authorizationCode }
+        if let oauthRefreshToken, !oauthRefreshToken.isEmpty { body["oauthRefreshToken"] = oauthRefreshToken }
 
         let data = try await FormaAPIClient.shared.requestData(
             path: "/api/auth/social",
@@ -267,6 +330,7 @@ public final class AuthManager: ObservableObject {
             timeout: 14.0,
             interceptAccountStatus: false
         )
+        KeychainHelper.shared.save(key: socialProviderIdKey, string: providerId)
         try await handleAuthSuccess(data: data, defaultProvider: provider.uppercased(), isNewRegistration: false)
     }
 
@@ -349,14 +413,39 @@ public final class AuthManager: ObservableObject {
     }
 
     public func deleteAccount() async throws {
+        var freshAppleAuthCode: String? = nil
+        if (currentAuthProvider ?? "").uppercased() == "APPLE" {
+            let coordinator = AppleDeletionAuthorizationCoordinator()
+            self.appleDeletionCoordinator = coordinator
+            defer { self.appleDeletionCoordinator = nil }
+            freshAppleAuthCode = try await coordinator.requestAuthorizationCode()
+        }
+
+        let storedGoogleToken = GoogleAuthService.shared.storedOAuthToken
+        var deleteBody: [String: Any] = [:]
+        if let freshAppleAuthCode, !freshAppleAuthCode.isEmpty {
+            deleteBody["authorizationCode"] = freshAppleAuthCode
+        }
+        if let storedGoogleToken, !storedGoogleToken.isEmpty {
+            deleteBody["googleToken"] = storedGoogleToken
+        }
+
         BackendSyncManager.shared.cancelPendingSyncs()
         _ = try await FormaAPIClient.shared.requestData(
             path: "/api/auth/account",
             method: "DELETE",
+            jsonBody: deleteBody.isEmpty ? nil : deleteBody,
             authenticated: true,
-            timeout: 15.0,
+            timeout: 20.0,
             interceptAccountStatus: false
         )
+
+        if let socialSub = KeychainHelper.shared.loadString(key: socialProviderIdKey), !socialSub.isEmpty {
+            KeychainHelper.shared.delete(key: "apple_name_\(socialSub)")
+            KeychainHelper.shared.delete(key: "apple_email_\(socialSub)")
+        }
+        KeychainHelper.shared.delete(key: socialProviderIdKey)
+        GoogleAuthService.shared.clearStoredOAuthToken()
         AIDataConsentManager.shared.clearConsentForCurrentUser()
         logout()
     }
@@ -376,6 +465,8 @@ public final class AuthManager: ObservableObject {
         KeychainHelper.shared.delete(key: userEmailKey)
         KeychainHelper.shared.delete(key: userNameKey)
         KeychainHelper.shared.delete(key: authProviderKey)
+        KeychainHelper.shared.delete(key: socialProviderIdKey)
+        GoogleAuthService.shared.clearStoredOAuthToken()
 
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: userIdKey)

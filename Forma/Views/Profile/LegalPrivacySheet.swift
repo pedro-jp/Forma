@@ -165,7 +165,7 @@ struct LegalPrivacySheet: View {
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
                             }
-                            Text("Você pode excluir permanentemente sua conta, todos os dados armazenados nos nossos servidores e revogar o vínculo do Sign in with Apple a qualquer momento acessando Perfil > Conta > Excluir Minha Conta.")
+                            Text("Você pode excluir permanentemente sua conta, todos os dados armazenados nos nossos servidores e revogar imediatamente os tokens de acesso do Sign in with Apple e do Google a qualquer momento acessando Perfil > Conta > Excluir Minha Conta.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }

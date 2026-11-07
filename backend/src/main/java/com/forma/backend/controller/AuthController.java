@@ -130,7 +130,8 @@ public class AuthController {
     ) {
         User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
         String appleAuthCode = body != null ? body.authorizationCode() : null;
-        adminUserService.deleteUserPermanently(user.getId(), appleAuthCode);
+        String googleToken = body != null ? body.googleToken() : null;
+        adminUserService.deleteUserPermanently(user.getId(), appleAuthCode, googleToken);
         authContextResolver.markUserDeleted(user.getId());
         return ResponseEntity.ok(Map.of(
             "status", "deleted",

@@ -36,11 +36,22 @@ public class SocialAuthVerificationService {
     private static final Logger log = LoggerFactory.getLogger(SocialAuthVerificationService.class);
 
     private static final String APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys";
-    private static final String APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token";
-    private static final String APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke";
+    private static final String DEFAULT_APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token";
+    private static final String DEFAULT_APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke";
     private static final String GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+    private static final String DEFAULT_GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
     private static final String APPLE_ISSUER = "https://appleid.apple.com";
     private static final String APP_BUNDLE_ID = "jota.Forma";
+
+    private volatile String appleTokenUrl = DEFAULT_APPLE_TOKEN_URL;
+    private volatile String appleRevokeUrl = DEFAULT_APPLE_REVOKE_URL;
+    private volatile String googleRevokeUrl = DEFAULT_GOOGLE_REVOKE_URL;
+
+    public void overrideOAuthEndpointsForTesting(String appleTokenUrl, String appleRevokeUrl, String googleRevokeUrl) {
+        this.appleTokenUrl = appleTokenUrl != null ? appleTokenUrl : DEFAULT_APPLE_TOKEN_URL;
+        this.appleRevokeUrl = appleRevokeUrl != null ? appleRevokeUrl : DEFAULT_APPLE_REVOKE_URL;
+        this.googleRevokeUrl = googleRevokeUrl != null ? googleRevokeUrl : DEFAULT_GOOGLE_REVOKE_URL;
+    }
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -366,7 +377,7 @@ public class SocialAuthVerificationService {
                 + "&grant_type=authorization_code";
 
             HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(APPLE_TOKEN_URL))
+                .uri(URI.create(appleTokenUrl))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
@@ -380,6 +391,11 @@ public class SocialAuthVerificationService {
                     log.info("[Apple Auth] Refresh token obtido com sucesso para suporte à revogação (Guideline 5.1.1(v)).");
                     return refreshToken;
                 }
+                String accessToken = json.path("access_token").asText("");
+                if (!accessToken.isBlank()) {
+                    log.info("[Apple Auth] Access token obtido para suporte à revogação (Guideline 5.1.1(v)).");
+                    return accessToken;
+                }
             } else {
                 log.warn("[Apple Auth] Resposta HTTP {} ao trocar authorization_code: {}", resp.statusCode(), resp.body());
             }
@@ -390,12 +406,20 @@ public class SocialAuthVerificationService {
     }
 
     public void revokeAppleTokensOnAccountDeletion(String storedRefreshToken, String freshAuthorizationCode) {
-        String tokenToRevoke = (storedRefreshToken != null && !storedRefreshToken.isBlank())
-            ? storedRefreshToken.trim()
-            : exchangeAppleAuthCodeForRefreshToken(freshAuthorizationCode);
+        java.util.LinkedHashSet<String> tokensToRevoke = new java.util.LinkedHashSet<>();
 
-        if (tokenToRevoke == null || tokenToRevoke.isBlank()) {
-            log.info("[Apple Auth] Nenhum refresh_token Apple armazenado para revogar; prosseguindo com exclusão integral dos dados.");
+        if (freshAuthorizationCode != null && !freshAuthorizationCode.isBlank()) {
+            String freshToken = exchangeAppleAuthCodeForRefreshToken(freshAuthorizationCode);
+            if (freshToken != null && !freshToken.isBlank()) {
+                tokensToRevoke.add(freshToken.trim());
+            }
+        }
+        if (storedRefreshToken != null && !storedRefreshToken.isBlank()) {
+            tokensToRevoke.add(storedRefreshToken.trim());
+        }
+
+        if (tokensToRevoke.isEmpty()) {
+            log.info("[Apple Auth] Nenhum token Apple armazenado ou recém-emitido para revogar; prosseguindo com exclusão integral dos dados.");
             return;
         }
 
@@ -405,27 +429,70 @@ public class SocialAuthVerificationService {
             return;
         }
 
-        try {
-            String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
-                + "&client_secret=" + urlEncode(clientSecret)
-                + "&token=" + urlEncode(tokenToRevoke)
-                + "&token_type_hint=refresh_token";
+        for (String tokenToRevoke : tokensToRevoke) {
+            try {
+                String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
+                    + "&client_secret=" + urlEncode(clientSecret)
+                    + "&token=" + urlEncode(tokenToRevoke)
+                    + "&token_type_hint=refresh_token";
 
-            HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(APPLE_REVOKE_URL))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
-                .build();
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(appleRevokeUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
+                    .build();
 
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                log.info("[Apple Auth] Token Sign in with Apple revogado com sucesso na Apple (HTTP {}).", resp.statusCode());
-            } else {
-                log.warn("[Apple Auth] Apple /auth/revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    log.info("[Apple Auth] Token Sign in with Apple revogado com sucesso na Apple (HTTP {}).", resp.statusCode());
+                } else {
+                    log.warn("[Apple Auth] Apple /auth/revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+                }
+            } catch (Exception e) {
+                log.warn("[Apple Auth] Falha de rede ao chamar /auth/revoke da Apple: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("[Apple Auth] Falha de rede ao chamar /auth/revoke da Apple: {}", e.getMessage());
+        }
+    }
+
+    // =========================================================================
+    // 4. GOOGLE OAUTH 2.0 TOKEN REVOCATION (RFC 7009)
+    // =========================================================================
+
+    public void revokeGoogleTokensOnAccountDeletion(String storedGoogleToken, String clientProvidedGoogleToken) {
+        java.util.LinkedHashSet<String> tokensToRevoke = new java.util.LinkedHashSet<>();
+        if (clientProvidedGoogleToken != null && !clientProvidedGoogleToken.isBlank()) {
+            tokensToRevoke.add(clientProvidedGoogleToken.trim());
+        }
+        if (storedGoogleToken != null && !storedGoogleToken.isBlank()) {
+            tokensToRevoke.add(storedGoogleToken.trim());
+        }
+
+        if (tokensToRevoke.isEmpty()) {
+            log.info("[Google Auth] Nenhum token OAuth do Google armazenado para revogar; prosseguindo com exclusão integral dos dados.");
+            return;
+        }
+
+        for (String token : tokensToRevoke) {
+            try {
+                String form = "token=" + urlEncode(token);
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(googleRevokeUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
+                    .build();
+
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    log.info("[Google Auth] Token Google OAuth revogado com sucesso no Google (HTTP {}).", resp.statusCode());
+                    return; // Revogar o refresh_token (ou access_token ativo) já invalida toda a concessão OAuth do app na conta Google
+                } else {
+                    log.warn("[Google Auth] Google /revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+                }
+            } catch (Exception e) {
+                log.warn("[Google Auth] Falha de rede ao chamar oauth2.googleapis.com/revoke: {}", e.getMessage());
+            }
         }
     }
 

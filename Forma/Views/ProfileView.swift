@@ -152,7 +152,7 @@ struct ProfileView: View {
                     performPermanentAccountDeletion()
                 }
             } message: {
-                Text("Esta ação não pode ser desfeita. Seu cadastro, refeições, treinos, fichas, pesagens e registros de água serão apagados definitivamente do Forma e da nuvem.")
+                Text("Esta ação não pode ser desfeita. Seu cadastro, refeições, treinos, fichas, pesagens e registros de água serão apagados definitivamente do Forma e da nuvem, e os tokens de acesso do Sign in with Apple e Google serão revogados.")
             }
             .task {
                 let active = FormaDataStore.shared.ensureSingleProfile(in: modelContext)
@@ -381,6 +381,8 @@ struct ProfileView: View {
         Task { @MainActor in
             do {
                 try await authManager.deleteAccount()
+                isDeletingAccount = false
+            } catch is CancellationError {
                 isDeletingAccount = false
             } catch {
                 deleteErrorMessage = error.localizedDescription

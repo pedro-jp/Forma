@@ -216,6 +216,12 @@ public class AuthService {
             }
         }
 
+        if ("GOOGLE".equalsIgnoreCase(provider)
+            && request.oauthRefreshToken() != null
+            && !request.oauthRefreshToken().isBlank()) {
+            user.setGoogleRefreshToken(request.oauthRefreshToken().trim());
+        }
+
         User savedUser = userRepository.save(user);
         UserProfile profile = userProfileRepository.findById(savedUser.getId())
             .orElseGet(() -> userProfileRepository.save(new UserProfile(savedUser.getId())));

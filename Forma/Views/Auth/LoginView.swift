@@ -36,6 +36,7 @@ struct LoginView: View {
         let idToken: String?
         let nonce: String?
         let authorizationCode: String?
+        let oauthRefreshToken: String?
         let existingEmail: String
     }
     
@@ -410,6 +411,7 @@ struct LoginView: View {
                         idToken: idToken,
                         nonce: rawNonce,
                         authorizationCode: authorizationCode,
+                        oauthRefreshToken: nil,
                         existingEmail: existingEmail.isEmpty ? (email ?? "") : existingEmail
                     )
                     showExistingAccountAlert = true
@@ -439,6 +441,9 @@ struct LoginView: View {
                 let userResult = try await GoogleAuthService.shared.startSignIn(rawNonce: rawNonce)
                 let resolvedProviderId = userResult.sub ?? "google_user_\(abs(rawNonce.hashValue))"
                 let resolvedName = userResult.name ?? "Usuário Google"
+                let googleRevocableToken = (userResult.refreshToken?.isEmpty == false)
+                    ? userResult.refreshToken
+                    : userResult.accessToken
                 do {
                     try await authManager.loginWithSocial(
                         provider: "GOOGLE",
@@ -448,7 +453,8 @@ struct LoginView: View {
                         idToken: userResult.idToken,
                         nonce: rawNonce,
                         isRegisterIntent: isRegisterMode,
-                        confirmExisting: false
+                        confirmExisting: false,
+                        oauthRefreshToken: googleRevocableToken
                     )
                     onLoginSuccess()
                 } catch FormaAPIError.accountAlreadyExists(_, let existingEmail, _) {
@@ -460,6 +466,7 @@ struct LoginView: View {
                         idToken: userResult.idToken,
                         nonce: rawNonce,
                         authorizationCode: nil,
+                        oauthRefreshToken: googleRevocableToken,
                         existingEmail: existingEmail.isEmpty ? (userResult.email ?? "") : existingEmail
                     )
                     showExistingAccountAlert = true
@@ -491,7 +498,8 @@ struct LoginView: View {
                     nonce: pending.nonce,
                     isRegisterIntent: false,
                     confirmExisting: true,
-                    authorizationCode: pending.authorizationCode
+                    authorizationCode: pending.authorizationCode,
+                    oauthRefreshToken: pending.oauthRefreshToken
                 )
                 onLoginSuccess()
             } catch {
