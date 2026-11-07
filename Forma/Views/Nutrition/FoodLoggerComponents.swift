@@ -79,7 +79,7 @@ struct FoodAnalysisPhaseBadge: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(phaseColor)
 
-            Text(isTacoPhase ? "Base Forma..." : "Inteligência Forma...")
+            Text(isTacoPhase ? "Tabela TACO..." : "IA Google Gemini...")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(phaseColor)
                 .lineLimit(1)

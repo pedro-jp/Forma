@@ -76,20 +76,47 @@ struct EvolutionAICoachSection: View {
                 FormaCard(padding: 28) {
                     FormaEmptyState(
                         icon: "brain.head.profile",
-                        title: "Nenhum diagnóstico gerado ainda",
-                        subtitle: "Toque em Gerar Diagnóstico acima para analisar seu balanço calórico, treinos, hidratação e metas dos últimos dias."
+                        title: "Nenhuma análise gerada ainda",
+                        subtitle: "Toque no botão acima para analisar seu balanço calórico, treinos, hidratação e metas com a IA do Google Gemini."
                     )
                 }
                 .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
             }
 
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("As metas e orientações da Inteligência Forma têm caráter informativo e educacional e não substituem acompanhamento médico, nutricional ou de educação física.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Análises geradas pela IA do Google Gemini (Google LLC) com caráter exclusivamente informativo e educacional. Não realizam diagnóstico médico/nutricional nem substituem acompanhamento de médico, nutricionista ou profissional de educação física.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 12) {
+                    if let mifflinURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/") {
+                        Link("Mifflin-St Jeor (PubMed)", destination: mifflinURL)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+                    if let tacoURL = URL(string: "https://www.cfn.org.br/wp-content/uploads/2017/03/taco_4_edicao_ampliada_e_revisada.pdf") {
+                        Link("Tabela TACO", destination: tacoURL)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+                    if let whoURL = URL(string: "https://www.who.int/news-room/fact-sheets/detail/physical-activity") {
+                        Link("OMS (WHO)", destination: whoURL)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+                    Spacer()
+                    if let reportURL = URL(string: "mailto:joaopedroc035@gmail.com?subject=Relato%20IA%20Forma") {
+                        Link("Reportar IA", destination: reportURL)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 20)
             }
             .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
         }
@@ -101,12 +128,13 @@ struct EvolutionAICoachSection: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(FormaTheme.Colors.brand)
-                Text("Treinador & Nutricionista Forma")
+                Text("Análise de Evolução • IA")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(FormaTheme.Colors.primaryText)
                 Spacer()
+                FormaBadge(text: "Google Gemini", icon: "sparkles", tint: FormaTheme.Colors.aiAccent)
             }
-            Text("A Inteligência Forma cruza seu histórico real de refeições, treinos, passos, água e pesagens para calibrar seu plano.")
+            Text("Utilizamos a IA do Google Gemini para cruzar seu histórico real de refeições, treinos, passos, água e pesagens e calibrar seu plano.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -119,14 +147,14 @@ struct EvolutionAICoachSection: View {
                 if isAnalyzing {
                     ProgressView()
                         .tint(.white)
-                    Text("Analisando sua evolução com Inteligência Forma...")
+                    Text("Analisando sua evolução com Google Gemini...")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                 } else {
                     Image(systemName: analysis == nil ? "wand.and.stars" : "arrow.triangle.2.circlepath")
                         .font(.system(size: 14, weight: .bold))
-                    Text(analysis == nil ? "Analisar com Inteligência Forma" : "Recalcular")
+                    Text(analysis == nil ? "Analisar com IA Google Gemini" : "Recalcular com Google Gemini")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -154,7 +182,7 @@ struct EvolutionAICoachSection: View {
                     Image(systemName: "target")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(FormaTheme.Colors.brand)
-                    Text("Diagnóstico de Balanço Calórico")
+                    Text("Análise de Balanço Calórico")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(FormaTheme.Colors.primaryText)
                     Spacer()

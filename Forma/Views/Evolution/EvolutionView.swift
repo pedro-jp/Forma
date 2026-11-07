@@ -33,8 +33,10 @@ struct EvolutionView: View {
 
     @State private var selectedSection: EvolutionSection = .overview
     @StateObject private var healthVM = HealthViewModel()
+    @ObservedObject private var aiConsent = AIDataConsentManager.shared
 
     @State private var showLogWeight: Bool = false
+    @State private var showAIConsentSheet: Bool = false
     @State private var toastMessage: String? = nil
 
     @State private var isAnalyzingAI: Bool = false
@@ -162,6 +164,11 @@ struct EvolutionView: View {
             .sheet(isPresented: $showLogWeight) {
                 LogWeightView()
                     .environment(\.modelContext, modelContext)
+            }
+            .sheet(isPresented: $showAIConsentSheet) {
+                AIDataConsentSheet {
+                    performEvolutionAIAnalysis()
+                }
             }
             .onAppear {
                 healthVM.loadHealthData()
@@ -460,6 +467,14 @@ struct EvolutionView: View {
     }
 
     private func generateAIAnalysis() {
+        if !aiConsent.hasGrantedConsent {
+            showAIConsentSheet = true
+            return
+        }
+        performEvolutionAIAnalysis()
+    }
+
+    private func performEvolutionAIAnalysis() {
         isAnalyzingAI = true
         aiErrorMessage = nil
         appliedTargetsSuccessfully = false

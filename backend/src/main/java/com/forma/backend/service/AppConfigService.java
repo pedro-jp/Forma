@@ -14,6 +14,11 @@ public class AppConfigService {
     public static final String KEY_GEMINI_MODEL = "GEMINI_MODEL";
     public static final String KEY_AI_BLOCKED = "AI_REQUESTS_BLOCKED";
     public static final String KEY_RESEND_API_KEY = "RESEND_API_KEY";
+    public static final String KEY_MAIL_FROM = "MAIL_FROM";
+    public static final String KEY_APPLE_TEAM_ID = "APPLE_TEAM_ID";
+    public static final String KEY_APPLE_KEY_ID = "APPLE_KEY_ID";
+    public static final String KEY_APPLE_PRIVATE_KEY = "APPLE_PRIVATE_KEY";
+    public static final String DEFAULT_APPLE_TEAM_ID = "Q42LJ4LG32";
     public static final String DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
 
     private final AppConfigRepository appConfigRepository;
@@ -112,18 +117,41 @@ public class AppConfigService {
     }
 
     public String getResendApiKey() {
-        String dbValue = appConfigRepository.findById(KEY_RESEND_API_KEY)
+        return getConfigOrEnv(KEY_RESEND_API_KEY, "");
+    }
+
+    public String getMailFrom() {
+        return getConfigOrEnv(KEY_MAIL_FROM, "");
+    }
+
+    public String getAppleTeamId() {
+        return getConfigOrEnv(KEY_APPLE_TEAM_ID, DEFAULT_APPLE_TEAM_ID);
+    }
+
+    public String getAppleKeyId() {
+        return getConfigOrEnv(KEY_APPLE_KEY_ID, "");
+    }
+
+    public String getApplePrivateKeyPem() {
+        return getConfigOrEnv(KEY_APPLE_PRIVATE_KEY, "");
+    }
+
+    private String getConfigOrEnv(String key, String fallback) {
+        String dbValue = appConfigRepository.findById(key)
             .map(AppConfigEntity::getConfigValue)
             .orElse("")
             .trim();
         if (!dbValue.isEmpty()) {
             return dbValue;
         }
-        String envValue = System.getenv(KEY_RESEND_API_KEY);
+        String envValue = System.getenv(key);
         if (envValue != null && !envValue.isBlank()) {
             return envValue.trim();
         }
-        String propValue = System.getProperty(KEY_RESEND_API_KEY);
-        return propValue != null ? propValue.trim() : "";
+        String propValue = System.getProperty(key);
+        if (propValue != null && !propValue.isBlank()) {
+            return propValue.trim();
+        }
+        return fallback;
     }
 }

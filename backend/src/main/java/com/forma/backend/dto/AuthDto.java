@@ -22,8 +22,22 @@ public class AuthDto {
         String providerId,
         String nonce,          // Nonce original para prevenção de replay attacks no Sign in with Apple
         Boolean isRegisterIntent,
-        Boolean confirmExisting
+        Boolean confirmExisting,
+        String authorizationCode // Código OAuth efêmero da Apple para troca/revogação (Guideline 5.1.1(v))
     ) {
+        public SocialLoginRequest(
+            String provider,
+            String idToken,
+            String email,
+            String name,
+            String providerId,
+            String nonce,
+            Boolean isRegisterIntent,
+            Boolean confirmExisting
+        ) {
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, null);
+        }
+
         public SocialLoginRequest(
             String provider,
             String idToken,
@@ -32,13 +46,15 @@ public class AuthDto {
             String providerId,
             String nonce
         ) {
-            this(provider, idToken, email, name, providerId, nonce, false, true);
+            this(provider, idToken, email, name, providerId, nonce, false, true, null);
         }
 
         public SocialLoginRequest(String provider, String idToken, String email, String name, String providerId) {
-            this(provider, idToken, email, name, providerId, null, false, true);
+            this(provider, idToken, email, name, providerId, null, false, true, null);
         }
     }
+
+    public record DeleteAccountRequest(String authorizationCode) {}
 
     public record AuthResponse(
         String token,

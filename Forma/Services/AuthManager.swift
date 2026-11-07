@@ -240,7 +240,8 @@ public final class AuthManager: ObservableObject {
         idToken: String?,
         nonce: String? = nil,
         isRegisterIntent: Bool = false,
-        confirmExisting: Bool = true
+        confirmExisting: Bool = true,
+        authorizationCode: String? = nil
     ) async throws {
         isAuthenticating = true
         errorMessage = nil
@@ -256,6 +257,7 @@ public final class AuthManager: ObservableObject {
         if let name, !name.isEmpty { body["name"] = name }
         if let idToken, !idToken.isEmpty { body["idToken"] = idToken }
         if let nonce, !nonce.isEmpty { body["nonce"] = nonce }
+        if let authorizationCode, !authorizationCode.isEmpty { body["authorizationCode"] = authorizationCode }
 
         let data = try await FormaAPIClient.shared.requestData(
             path: "/api/auth/social",
@@ -355,6 +357,7 @@ public final class AuthManager: ObservableObject {
             timeout: 15.0,
             interceptAccountStatus: false
         )
+        AIDataConsentManager.shared.clearConsentForCurrentUser()
         logout()
     }
 
@@ -387,6 +390,7 @@ public final class AuthManager: ObservableObject {
         BackendSyncManager.shared.clearAllPendingDeletions()
         BackendSyncManager.shared.markRequiresInitialPull(false)
         BackendSyncManager.shared.hasCompletedInitialSessionPull = false
+        AIDataConsentManager.shared.refreshForCurrentUser()
         FormaDataStore.shared.resetLocalDataForUserSwitch(userName: nil, userEmail: nil)
     }
 
@@ -458,6 +462,7 @@ public final class AuthManager: ObservableObject {
         UserDefaults.standard.set(result.name, forKey: userNameKey)
         UserDefaults.standard.set(self.currentAuthProvider, forKey: authProviderKey)
         UserDefaults.standard.removeObject(forKey: "forma_is_guest")
+        AIDataConsentManager.shared.refreshForCurrentUser()
 
         // 3. Aplica dados imediatos do perfil retornados pelo servidor
         let localProfile = FormaDataStore.shared.ensureSingleProfile(in: FormaDataStore.shared.mainContext)

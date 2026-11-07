@@ -105,6 +105,33 @@ class AdminUserControlIntegrationTest {
             assertThat(modelId).doesNotContain("1.5").doesNotContain("2.0").doesNotContain("2.5");
             assertThat(modelId).isNotEqualTo("gemini-flash-lite-latest");
         }
+
+        // Senha padrão legada (admin123) não autentica nem por login nem por X-Admin-Key
+        mockMvc.perform(post("/api/admin/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of(
+                    "username", "admin",
+                    "password", "admin123"
+                ))))
+            .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/admin/overview")
+                .header("X-Admin-Key", "admin123"))
+            .andExpect(status().isUnauthorized());
+
+        // Login sob HTTPS (X-Forwarded-Proto: https) emite cookie HttpOnly + Secure
+        MvcResult httpsLoginRes = mockMvc.perform(post("/api/admin/login")
+                .header("X-Forwarded-Proto", "https")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of(
+                    "username", "admin",
+                    "password", "test_admin_password"
+                ))))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        String setCookieHeader = httpsLoginRes.getResponse().getHeader(HttpHeaders.SET_COOKIE);
+        assertThat(setCookieHeader).contains("HttpOnly").contains("Secure");
     }
 
     @Test

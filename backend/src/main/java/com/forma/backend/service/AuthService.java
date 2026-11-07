@@ -10,6 +10,7 @@ import com.forma.backend.exception.DomainExceptions.AccountPausedException;
 import com.forma.backend.exception.DomainExceptions.InvalidCredentialsException;
 import com.forma.backend.repository.UserProfileRepository;
 import com.forma.backend.repository.UserRepository;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,7 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final BCryptPasswordEncoder BCRYPT_ENCODER = new BCryptPasswordEncoder(10);
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
@@ -95,12 +97,15 @@ public class AuthService {
         User user = userRepository.findByEmail(normalizedEmail)
             .orElseThrow(() -> new InvalidCredentialsException("Usuário ou senha incorretos."));
 
-        String inputHash = hashPassword(request.password());
-        if (!inputHash.equals(user.getPasswordHash())) {
+        if (!matchesPassword(request.password(), user.getPasswordHash())) {
             throw new InvalidCredentialsException("Usuário ou senha incorretos.");
         }
         assertUserNotPaused(user);
 
+        // Migração transparente de hashes legados SHA-256 para BCrypt (LGPD Art. 46)
+        if (!isBcryptHash(user.getPasswordHash())) {
+            user.setPasswordHash(hashPassword(request.password()));
+        }
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
 
@@ -200,6 +205,17 @@ public class AuthService {
             userProfileRepository.save(new UserProfile(user.getId()));
         }
 
+        if ("APPLE".equalsIgnoreCase(provider)
+            && request.authorizationCode() != null
+            && !request.authorizationCode().isBlank()) {
+            String appleRefreshToken = socialAuthVerificationService.exchangeAppleAuthCodeForRefreshToken(
+                request.authorizationCode()
+            );
+            if (appleRefreshToken != null && !appleRefreshToken.isBlank()) {
+                user.setAppleRefreshToken(appleRefreshToken);
+            }
+        }
+
         User savedUser = userRepository.save(user);
         UserProfile profile = userProfileRepository.findById(savedUser.getId())
             .orElseGet(() -> userProfileRepository.save(new UserProfile(savedUser.getId())));
@@ -253,8 +269,7 @@ public class AuthService {
             throw new InvalidCredentialsException("Código expirado. Solicite um novo código.");
         }
 
-        String codeHash = hashPassword(request.code().trim());
-        if (!codeHash.equals(user.getResetCodeHash())) {
+        if (!matchesPassword(request.code().trim(), user.getResetCodeHash())) {
             throw new InvalidCredentialsException("Código de verificação incorreto.");
         }
 
@@ -282,7 +297,7 @@ public class AuthService {
 
         if (user.getPasswordHash() != null && !user.getPasswordHash().isBlank()) {
             String current = request.currentPassword() != null ? request.currentPassword().trim() : "";
-            if (!hashPassword(current).equals(user.getPasswordHash())) {
+            if (!matchesPassword(current, user.getPasswordHash())) {
                 throw new InvalidCredentialsException("A senha atual informada está incorreta.");
             }
         }
@@ -301,7 +316,10 @@ public class AuthService {
                 resendKey = System.getProperty("RESEND_API_KEY", "");
             }
         }
-        String fromAddress = System.getenv("MAIL_FROM");
+        String fromAddress = appConfigService != null ? appConfigService.getMailFrom() : "";
+        if (fromAddress == null || fromAddress.isBlank()) {
+            fromAddress = System.getenv("MAIL_FROM");
+        }
         if (fromAddress == null || fromAddress.isBlank()) {
             fromAddress = System.getProperty("MAIL_FROM", "Forma <onboarding@resend.dev>");
         }
@@ -394,9 +412,33 @@ public class AuthService {
 
     public String hashPassword(String password) {
         if (password == null) return "";
+        return BCRYPT_ENCODER.encode(password);
+    }
+
+    public boolean matchesPassword(String rawPassword, String storedHash) {
+        if (rawPassword == null || storedHash == null || storedHash.isBlank()) {
+            return false;
+        }
+        if (isBcryptHash(storedHash)) {
+            try {
+                return BCRYPT_ENCODER.matches(rawPassword, storedHash);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return legacySha256Hash(rawPassword).equals(storedHash);
+    }
+
+    private boolean isBcryptHash(String hash) {
+        return hash != null
+            && (hash.startsWith("$2a$") || hash.startsWith("$2b$") || hash.startsWith("$2y$"));
+    }
+
+    private String legacySha256Hash(String password) {
+        if (password == null) return "";
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            // Mantém o salt histórico para compatibilidade integral com contas já registradas
+            // Compatibilidade com hashes legados até que o usuário realize login e migre para BCrypt
             byte[] hash = digest.digest(("forma_salt_" + password).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException e) {

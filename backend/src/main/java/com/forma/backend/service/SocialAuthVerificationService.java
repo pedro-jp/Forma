@@ -2,24 +2,30 @@ package com.forma.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jsonwebtoken.Jwts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigInteger;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
+import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Date;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,12 +36,15 @@ public class SocialAuthVerificationService {
     private static final Logger log = LoggerFactory.getLogger(SocialAuthVerificationService.class);
 
     private static final String APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys";
+    private static final String APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token";
+    private static final String APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke";
     private static final String GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
     private static final String APPLE_ISSUER = "https://appleid.apple.com";
     private static final String APP_BUNDLE_ID = "jota.Forma";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final AppConfigService appConfigService;
 
     // Cache de chaves públicas por Key ID (KID)
     private final Map<String, PublicKey> appleKeysCache = new ConcurrentHashMap<>();
@@ -51,10 +60,16 @@ public class SocialAuthVerificationService {
     ) {}
 
     public SocialAuthVerificationService() {
+        this(null);
+    }
+
+    @Autowired
+    public SocialAuthVerificationService(AppConfigService appConfigService) {
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
         this.objectMapper = new ObjectMapper();
+        this.appConfigService = appConfigService;
     }
 
     public VerifiedSocialUser verifyToken(String provider, String idToken, String rawNonce, String fallbackName) {
@@ -328,5 +343,131 @@ public class SocialAuthVerificationService {
         } catch (Exception e) {
             return input;
         }
+    }
+
+    // =========================================================================
+    // 3. SIGN IN WITH APPLE TOKEN EXCHANGE & REVOCATION (Guideline 5.1.1(v))
+    // =========================================================================
+
+    public String exchangeAppleAuthCodeForRefreshToken(String authorizationCode) {
+        if (authorizationCode == null || authorizationCode.isBlank()) {
+            return null;
+        }
+        String clientSecret = generateAppleClientSecret();
+        if (clientSecret == null) {
+            log.info("[Apple Auth] APPLE_KEY_ID / APPLE_PRIVATE_KEY não configurados ainda; código recebido para troca futura.");
+            return null;
+        }
+
+        try {
+            String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
+                + "&client_secret=" + urlEncode(clientSecret)
+                + "&code=" + urlEncode(authorizationCode.trim())
+                + "&grant_type=authorization_code";
+
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(APPLE_TOKEN_URL))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
+                .build();
+
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                JsonNode json = objectMapper.readTree(resp.body());
+                String refreshToken = json.path("refresh_token").asText("");
+                if (!refreshToken.isBlank()) {
+                    log.info("[Apple Auth] Refresh token obtido com sucesso para suporte à revogação (Guideline 5.1.1(v)).");
+                    return refreshToken;
+                }
+            } else {
+                log.warn("[Apple Auth] Resposta HTTP {} ao trocar authorization_code: {}", resp.statusCode(), resp.body());
+            }
+        } catch (Exception e) {
+            log.warn("[Apple Auth] Falha ao trocar authorization_code da Apple: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    public void revokeAppleTokensOnAccountDeletion(String storedRefreshToken, String freshAuthorizationCode) {
+        String tokenToRevoke = (storedRefreshToken != null && !storedRefreshToken.isBlank())
+            ? storedRefreshToken.trim()
+            : exchangeAppleAuthCodeForRefreshToken(freshAuthorizationCode);
+
+        if (tokenToRevoke == null || tokenToRevoke.isBlank()) {
+            log.info("[Apple Auth] Nenhum refresh_token Apple armazenado para revogar; prosseguindo com exclusão integral dos dados.");
+            return;
+        }
+
+        String clientSecret = generateAppleClientSecret();
+        if (clientSecret == null) {
+            log.warn("[Apple Auth] Revogação Apple ignorada pois APPLE_KEY_ID / APPLE_PRIVATE_KEY não estão definidos.");
+            return;
+        }
+
+        try {
+            String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
+                + "&client_secret=" + urlEncode(clientSecret)
+                + "&token=" + urlEncode(tokenToRevoke)
+                + "&token_type_hint=refresh_token";
+
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(APPLE_REVOKE_URL))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
+                .build();
+
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                log.info("[Apple Auth] Token Sign in with Apple revogado com sucesso na Apple (HTTP {}).", resp.statusCode());
+            } else {
+                log.warn("[Apple Auth] Apple /auth/revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+            }
+        } catch (Exception e) {
+            log.warn("[Apple Auth] Falha de rede ao chamar /auth/revoke da Apple: {}", e.getMessage());
+        }
+    }
+
+    private String generateAppleClientSecret() {
+        if (appConfigService == null) {
+            return null;
+        }
+        String teamId = appConfigService.getAppleTeamId();
+        String keyId = appConfigService.getAppleKeyId();
+        String privateKeyPem = appConfigService.getApplePrivateKeyPem();
+
+        if (teamId.isBlank() || keyId.isBlank() || privateKeyPem.isBlank()) {
+            return null;
+        }
+
+        try {
+            String normalizedPem = privateKeyPem
+                .replace("\\n", "\n")
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replaceAll("\\s+", "");
+            byte[] pkcs8Bytes = Base64.getDecoder().decode(normalizedPem);
+            PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(pkcs8Bytes);
+            PrivateKey ecPrivateKey = KeyFactory.getInstance("EC").generatePrivate(keySpec);
+
+            Instant now = Instant.now();
+            return Jwts.builder()
+                .header().keyId(keyId).and()
+                .issuer(teamId)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(300)))
+                .audience().add(APPLE_ISSUER).and()
+                .subject(APP_BUNDLE_ID)
+                .signWith(ecPrivateKey, Jwts.SIG.ES256)
+                .compact();
+        } catch (Exception e) {
+            log.warn("[Apple Auth] Erro ao assinar client_secret ES256 da Apple: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static String urlEncode(String value) {
+        return URLEncoder.encode(value != null ? value : "", StandardCharsets.UTF_8);
     }
 }

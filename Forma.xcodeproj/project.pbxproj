@@ -318,7 +318,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -377,7 +377,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -401,12 +401,13 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Forma;
 				INFOPLIST_KEY_CFBundleURLTypes = "({\n    CFBundleURLName = \"jota.Forma\";\n    CFBundleURLSchemes =     (\n        forma\n    );\n},{\n    CFBundleURLName = \"Google OAuth\";\n    CFBundleURLSchemes =     (\n        \"com.googleusercontent.apps.1092895218480-kca5pj9b1g8r50t66phm6ccnupr83p94\"\n    );\n})";
-				INFOPLIST_KEY_NSAllowsArbitraryLoads = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "O Forma precisa da câmera para fotografar suas refeições e rótulos nutricionais para análise automática.";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "O Forma precisa da câmera para fotografar suas refeições e rótulos nutricionais e estimar calorias e nutrientes (com análise opcional via IA Google Gemini mediante sua autorização).";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "O Forma precisa acessar seus dados do Saúde para exibir seus passos e calorias.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "O Forma precisa salvar seus treinos e calorias gastas no app Saúde.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "O Forma precisa do microfone para você ditar os alimentos consumidos.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "O Forma precisa acessar suas fotos para analisar imagens de refeições e rótulos nutricionais.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "O Forma precisa acessar suas fotos para identificar pratos e rótulos nutricionais (com análise opcional via IA Google Gemini mediante sua autorização).";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "O Forma usa o reconhecimento de voz para transcrever e registrar seus alimentos automaticamente.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
@@ -437,7 +438,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Forma/Forma.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Forma/FormaRelease.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Q42LJ4LG32;
@@ -445,12 +446,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Forma;
 				INFOPLIST_KEY_CFBundleURLTypes = "({\n    CFBundleURLName = \"jota.Forma\";\n    CFBundleURLSchemes =     (\n        forma\n    );\n},{\n    CFBundleURLName = \"Google OAuth\";\n    CFBundleURLSchemes =     (\n        \"com.googleusercontent.apps.1092895218480-kca5pj9b1g8r50t66phm6ccnupr83p94\"\n    );\n})";
-				INFOPLIST_KEY_NSAllowsArbitraryLoads = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "O Forma precisa da câmera para fotografar suas refeições e rótulos nutricionais para análise automática.";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "O Forma precisa da câmera para fotografar suas refeições e rótulos nutricionais e estimar calorias e nutrientes (com análise opcional via IA Google Gemini mediante sua autorização).";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "O Forma precisa acessar seus dados do Saúde para exibir seus passos e calorias.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "O Forma precisa salvar seus treinos e calorias gastas no app Saúde.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "O Forma precisa do microfone para você ditar os alimentos consumidos.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "O Forma precisa acessar suas fotos para analisar imagens de refeições e rótulos nutricionais.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "O Forma precisa acessar suas fotos para identificar pratos e rótulos nutricionais (com análise opcional via IA Google Gemini mediante sua autorização).";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "O Forma usa o reconhecimento de voz para transcrever e registrar seus alimentos automaticamente.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
@@ -542,7 +543,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Q42LJ4LG32;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = jota.FormaTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -565,7 +566,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Q42LJ4LG32;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = jota.FormaTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

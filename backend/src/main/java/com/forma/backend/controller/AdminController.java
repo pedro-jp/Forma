@@ -58,7 +58,7 @@ public class AdminController {
         AdminEventPublisherService adminEventPublisherService,
         @Value("${app.admin.username:admin}") String configuredAdminUsername,
         @Value("${app.admin.password:admin123}") String configuredAdminPassword,
-        @Value("${app.admin.key:admin123}") String configuredAdminKey
+        @Value("${app.admin.key:}") String configuredAdminKey
     ) {
         this.userRepository = userRepository;
         this.foodEntryRepository = foodEntryRepository;
@@ -77,6 +77,7 @@ public class AdminController {
     @PostMapping("/login")
     public ResponseEntity<?> login(
         @RequestBody Map<String, String> body,
+        HttpServletRequest request,
         HttpServletResponse response
     ) {
         String username = body != null ? body.get("username") : null;
@@ -87,8 +88,10 @@ public class AdminController {
         }
 
         boolean validUser = username.trim().equalsIgnoreCase(configuredAdminUsername.trim());
-        boolean validPass = password.trim().equals(configuredAdminPassword.trim())
-            || password.trim().equals(configuredAdminKey.trim());
+        boolean hasAdminKey = configuredAdminKey != null && !configuredAdminKey.trim().isEmpty();
+        boolean hasAdminPassword = configuredAdminPassword != null && !configuredAdminPassword.trim().isEmpty();
+        boolean validPass = (hasAdminPassword && password.trim().equals(configuredAdminPassword.trim()))
+            || (hasAdminKey && password.trim().equals(configuredAdminKey.trim()));
 
         if (!validUser || !validPass) {
             throw new InvalidCredentialsException("Usuário ou senha de administrador inválidos.");
@@ -97,7 +100,7 @@ public class AdminController {
         String adminToken = jwtService.generateAdminToken(username.trim());
         ResponseCookie cookie = ResponseCookie.from(AuthContextResolver.ADMIN_COOKIE_NAME, adminToken)
             .httpOnly(true)
-            .secure(false)
+            .secure(isSecureRequest(request))
             .path("/")
             .maxAge(Duration.ofDays(7))
             .sameSite("Lax")
@@ -113,16 +116,27 @@ public class AdminController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpServletResponse response) {
+    public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response) {
         ResponseCookie cookie = ResponseCookie.from(AuthContextResolver.ADMIN_COOKIE_NAME, "")
             .httpOnly(true)
-            .secure(false)
+            .secure(isSecureRequest(request))
             .path("/")
             .maxAge(0)
             .sameSite("Lax")
             .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         return ResponseEntity.ok(Map.of("status", "logged_out", "message", "Sessão encerrada com sucesso"));
+    }
+
+    private boolean isSecureRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (request.isSecure()) {
+            return true;
+        }
+        String forwardedProto = request.getHeader("X-Forwarded-Proto");
+        return forwardedProto != null && forwardedProto.trim().toLowerCase().startsWith("https");
     }
 
     @GetMapping("/auth-check")

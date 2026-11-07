@@ -54,6 +54,9 @@ public class User {
     @Column(name = "reset_code_expires_at")
     private Instant resetCodeExpiresAt;
 
+    @Column(name = "apple_refresh_token", length = 1024)
+    private String appleRefreshToken;
+
     public User() {}
 
     public User(String email, String name, String authProvider, String providerId) {
@@ -113,4 +116,7 @@ public class User {
 
     public Instant getResetCodeExpiresAt() { return resetCodeExpiresAt; }
     public void setResetCodeExpiresAt(Instant resetCodeExpiresAt) { this.resetCodeExpiresAt = resetCodeExpiresAt; }
+
+    public String getAppleRefreshToken() { return appleRefreshToken; }
+    public void setAppleRefreshToken(String appleRefreshToken) { this.appleRefreshToken = appleRefreshToken; }
 }

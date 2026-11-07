@@ -125,10 +125,12 @@ public class AuthController {
     @DeleteMapping("/account")
     public ResponseEntity<Map<String, String>> deleteOwnAccount(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId
+        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
+        @RequestBody(required = false) AuthDto.DeleteAccountRequest body
     ) {
         User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
-        adminUserService.deleteUserPermanently(user.getId());
+        String appleAuthCode = body != null ? body.authorizationCode() : null;
+        adminUserService.deleteUserPermanently(user.getId(), appleAuthCode);
         authContextResolver.markUserDeleted(user.getId());
         return ResponseEntity.ok(Map.of(
             "status", "deleted",

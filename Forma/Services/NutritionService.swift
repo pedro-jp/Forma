@@ -233,8 +233,8 @@ public class NutritionService {
             return local
         }
         
-        // 2. FALLBACK: Se NÃO estiver na base local e a chave estiver configurada, consulta a base expandida na nuvem
-        if GeminiConfig.shared.hasValidKey {
+        // 2. FALLBACK: Se NÃO estiver na base local, a chave estiver configurada e houver consentimento de IA, consulta a base expandida na nuvem
+        if GeminiConfig.shared.hasValidKey && AIDataConsentManager.isConsentGranted {
             do {
                 let aiMeal = try await GeminiAIService.shared.analyzeMeal(description: clean)
                 

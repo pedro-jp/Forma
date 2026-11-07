@@ -9,6 +9,7 @@ import SwiftUI
 
 struct LegalPrivacySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var aiConsent = AIDataConsentManager.shared
 
     var body: some View {
         NavigationStack {
@@ -19,16 +20,76 @@ struct LegalPrivacySheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "hand.raised.shield.fill")
                                     .foregroundStyle(FormaTheme.Colors.brand)
-                                Text("Privacidade & Dados Pessoais")
+                                Text("Privacidade & LGPD (Lei 13.709/2018)")
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
                             }
-                            Text("O Forma coleta apenas os dados necessários para calcular suas metas diárias e sincronizar seu progresso: nome, e-mail, refeições (incluindo fotos ou áudio enviados por você para identificação de alimentos), ingestão de água, treinos, fichas e pesagens.")
+                            Text("O Forma coleta apenas os dados necessários para calcular suas metas diárias e sincronizar seu progresso: nome, e-mail, peso, altura, objetivo corporal, refeições (incluindo fotos ou áudio enviados por você), ingestão de água, treinos e fichas.")
                                 .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Controlador: Forma App (João Pedro) • Contato do Encarregado (DPO): joaopedroc035@gmail.com. Dados criptografados via TLS e senhas protegidas por BCrypt, com armazenamento em nuvem internacional segura (Supabase Inc. e Render Services Inc.).")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("Seus dados nunca são vendidos a terceiros nem usados para publicidade ou rastreamento entre aplicativos.")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(FormaTheme.Colors.brand)
+
+                            HStack(spacing: 14) {
+                                if let privacyURL = URL(string: "https://forma-94vp.onrender.com/privacy.html") {
+                                    Link(destination: privacyURL) {
+                                        Label("Política de Privacidade", systemImage: "arrow.up.right.square")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(FormaTheme.Colors.brand)
+                                    }
+                                }
+                                if let termsURL = URL(string: "https://forma-94vp.onrender.com/terms.html") {
+                                    Link(destination: termsURL) {
+                                        Label("Termos de Uso (EULA)", systemImage: "doc.text")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(FormaTheme.Colors.brand)
+                                    }
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
+
+                    FormaCard(padding: 18) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(FormaTheme.Colors.aiAccent)
+                                Text("IA do Google Gemini (Google LLC)")
+                                    .font(.headline)
+                                    .foregroundStyle(FormaTheme.Colors.primaryText)
+                            }
+                            Text("O Forma utiliza a inteligência artificial do Google Gemini (Google LLC). Quando você autoriza o uso da IA na nuvem, fotos ou descrições de refeições, descrições de treinos, seu nome de exibição, medidas corporais (peso, altura e objetivo) e histórico recente de progresso são enviados sob demanda à Google Gemini API por conexão criptografada exclusivamente para gerar suas estimativas e análises no app.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Seu e-mail, senha e credenciais Apple/Google nunca são compartilhados com a IA do Google Gemini.")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                            Divider()
+
+                            Toggle(
+                                isOn: Binding(
+                                    get: { aiConsent.hasGrantedConsent },
+                                    set: { aiConsent.setConsent($0) }
+                                )
+                            ) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Autorizar IA do Google Gemini")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                                    Text(aiConsent.hasGrantedConsent
+                                         ? "Ativo • Você pode revogar a qualquer momento."
+                                         : "Desativado • Apenas cálculos locais e base TACO estão em uso.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .tint(FormaTheme.Colors.brand)
                         }
                     }
 
@@ -52,16 +113,46 @@ struct LegalPrivacySheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "stethoscope")
                                     .foregroundStyle(FormaTheme.Colors.warning)
-                                Text("Aviso de Saúde, Nutrição e Bem-Estar")
+                                Text("Aviso de Saúde & Fontes Científicas")
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
                             }
-                            Text("As estimativas calóricas, metas diárias e recomendações da Inteligência Forma têm caráter exclusivamente informativo e educacional, baseadas em referências públicas de fisiologia e nutrição (como a fórmula de Mifflin-St Jeor e a Tabela Brasileira de Composição de Alimentos).")
+                            Text("As estimativas calóricas, cálculos de IMC/TMB, metas diárias e orientações geradas com a IA do Google Gemini têm caráter exclusivamente informativo e educacional. O Forma não realiza diagnóstico médico ou clínico e não substitui médico, nutricionista ou profissional de educação física.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("O Forma não realiza diagnóstico médico e não substitui a orientação de médico, nutricionista ou profissional de educação física. Consulte um profissional de saúde antes de iniciar dietas restritivas ou rotinas intensas de treino.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Referências Científicas Oficiais:")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                                if let mifflinURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/") {
+                                    Link("• Taxa Metabólica Basal — Equação de Mifflin-St Jeor (PubMed)", destination: mifflinURL)
+                                        .font(.caption)
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                }
+                                if let tacoURL = URL(string: "https://www.cfn.org.br/wp-content/uploads/2017/03/taco_4_edicao_ampliada_e_revisada.pdf") {
+                                    Link("• Composição de Alimentos — Tabela TACO 4ª ed. (NEPA/UNICAMP)", destination: tacoURL)
+                                        .font(.caption)
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                }
+                                if let whoURL = URL(string: "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight") {
+                                    Link("• Classificação de IMC & Peso Saudável — OMS (WHO)", destination: whoURL)
+                                        .font(.caption)
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                }
+                                if let metURL = URL(string: "https://pacompendium.com/") {
+                                    Link("• Gasto Calórico em Exercícios (METs) — Compendium of Physical Activities", destination: metURL)
+                                        .font(.caption)
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                }
+                                if let issnURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/28642676/") {
+                                    Link("• Proteínas e Exercício Físico — ISSN Position Stand (PubMed)", destination: issnURL)
+                                        .font(.caption)
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                }
+                            }
+                            .padding(.top, 2)
                         }
                     }
 
@@ -70,11 +161,11 @@ struct LegalPrivacySheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "trash.slash.fill")
                                     .foregroundStyle(FormaTheme.Colors.danger)
-                                Text("Controle Total & Exclusão de Conta")
+                                Text("Direitos LGPD & Exclusão de Conta")
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
                             }
-                            Text("Você pode excluir permanentemente sua conta e todos os dados armazenados nos nossos servidores e neste aparelho a qualquer momento acessando Perfil > Conta > Excluir Minha Conta.")
+                            Text("Você pode excluir permanentemente sua conta, todos os dados armazenados nos nossos servidores e revogar o vínculo do Sign in with Apple a qualquer momento acessando Perfil > Conta > Excluir Minha Conta.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }

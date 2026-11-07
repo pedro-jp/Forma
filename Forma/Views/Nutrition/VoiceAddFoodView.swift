@@ -16,6 +16,7 @@ struct VoiceAddFoodView: View {
     @Query(sort: \FoodEntry.date, order: .reverse) private var allFoodEntries: [FoodEntry]
 
     @StateObject private var voiceService = VoiceRecognitionService.shared
+    @ObservedObject private var aiConsent = AIDataConsentManager.shared
 
     var preselectedMeal: MealType? = nil
     var initialOpenCamera: Bool = false
@@ -26,6 +27,8 @@ struct VoiceAddFoodView: View {
     @State private var selectedImageData: Data? = nil
     @State private var selectedPhotoPickerItem: PhotosPickerItem? = nil
     @State private var showCameraSheet: Bool = false
+    @State private var showAIConsentSheet: Bool = false
+    @State private var pendingAIConsentAction: (() -> Void)? = nil
 
     @State private var editingPortionItem: VoicePlateItem? = nil
     @State private var customPortionString: String = ""
@@ -66,6 +69,23 @@ struct VoiceAddFoodView: View {
                     handlePickedUIImage(capturedImage)
                 }
                 .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showAIConsentSheet) {
+                AIDataConsentSheet(
+                    onAuthorized: {
+                        let action = pendingAIConsentAction
+                        pendingAIConsentAction = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            action?()
+                        }
+                    },
+                    onDeclined: {
+                        pendingAIConsentAction = nil
+                        if selectedImage != nil && (voiceService.currentIntent?.items.isEmpty ?? true) {
+                            clearSelectedPhoto()
+                        }
+                    }
+                )
             }
             .onChange(of: selectedPhotoPickerItem) { _, newItem in
                 guard let newItem else { return }
@@ -126,7 +146,9 @@ struct VoiceAddFoodView: View {
                 if initialOpenCamera {
                     voiceService.stopListening(shouldAnalyze: false)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showCameraSheet = true
+                        runWithAIConsent {
+                            showCameraSheet = true
+                        }
                     }
                 } else {
                     startVoiceFlow()
@@ -279,7 +301,9 @@ struct VoiceAddFoodView: View {
                         textDebounceTask?.cancel()
                         isFieldFocused = false
                         voiceService.stopListening(shouldAnalyze: false)
-                        showCameraSheet = true
+                        runWithAIConsent {
+                            showCameraSheet = true
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "camera.fill")
@@ -461,6 +485,15 @@ struct VoiceAddFoodView: View {
         .buttonStyle(.plain)
     }
 
+    private func runWithAIConsent(_ action: @escaping () -> Void) {
+        if aiConsent.hasGrantedConsent {
+            action()
+        } else {
+            pendingAIConsentAction = action
+            showAIConsentSheet = true
+        }
+    }
+
     private func triggerManualAIAnalysis(forceAI: Bool) {
         textDebounceTask?.cancel()
         isFieldFocused = false
@@ -468,13 +501,21 @@ struct VoiceAddFoodView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
         if let imgData = selectedImageData {
-            voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+            runWithAIConsent {
+                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+            }
         } else {
             let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
             let fallback = voiceService.currentIntent?.rawText ?? ""
             let query = !trimmed.isEmpty ? trimmed : fallback
             guard !query.isEmpty else { return }
-            voiceService.analyzeIntent(from: query, forceAI: forceAI, allowCloudAI: true)
+            if forceAI {
+                runWithAIConsent {
+                    voiceService.analyzeIntent(from: query, forceAI: true, allowCloudAI: true)
+                }
+            } else {
+                voiceService.analyzeIntent(from: query, forceAI: false, allowCloudAI: aiConsent.hasGrantedConsent)
+            }
         }
     }
 
@@ -490,7 +531,9 @@ struct VoiceAddFoodView: View {
 
         selectedImage = image
         selectedImageData = compressed
-        voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
+        runWithAIConsent {
+            voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
+        }
     }
 
     private func clearSelectedPhoto() {
@@ -536,7 +579,9 @@ struct VoiceAddFoodView: View {
         if voiceService.isRecording {
             voiceService.stopListening(shouldAnalyze: selectedImageData == nil)
             if let imgData = selectedImageData {
-                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+                runWithAIConsent {
+                    voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+                }
             }
         } else {
             isFieldFocused = false

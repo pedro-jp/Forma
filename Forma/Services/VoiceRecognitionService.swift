@@ -902,7 +902,7 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         request: SFSpeechAudioBufferRecognitionRequest,
         onLevelUpdate: @escaping @Sendable (Float) -> Void
     ) {
-        try? inputNode.__installTap(onBus: 0, bufferSize: 1024, format: format, error: ()) { buffer, _ in
+        let tapBlock: AVAudioNodeTapBlock = { buffer, _ in
             request.append(buffer)
 
             guard let channelData = buffer.floatChannelData?[0] else { return }
@@ -917,6 +917,12 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
             let rms = sqrt(sum / Float(frameLength))
             let level = min(max(rms * 10.0, 0.05), 1.0)
             onLevelUpdate(level)
+        }
+
+        if #available(iOS 27.0, *) {
+            try? inputNode.__installTap(onBus: 0, bufferSize: 1024, format: format, error: (), block: tapBlock)
+        } else {
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format, block: tapBlock)
         }
     }
 }

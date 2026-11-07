@@ -130,4 +130,65 @@ final class FoodParserAndPortionTests: XCTestCase {
         XCTAssertNotNil(feijoada)
         XCTAssertTrue(feijoada?.reasonBadge.localizedCaseInsensitiveContains("quarta") == true)
     }
+
+    func testAIDataConsentManagerIsolatesPerUserAndGatesExternalAI() async {
+        let userDefaults = UserDefaults.standard
+        let previousUserId = userDefaults.string(forKey: "forma_user_id")
+        let userA = "test-consent-a-\(UUID().uuidString)"
+        let userB = "test-consent-b-\(UUID().uuidString)"
+
+        defer {
+            userDefaults.removeObject(forKey: "forma_ai_third_party_consent_v1_\(userA.lowercased())")
+            userDefaults.removeObject(forKey: "forma_ai_third_party_consent_v1_\(userB.lowercased())")
+            if let previousUserId {
+                userDefaults.set(previousUserId, forKey: "forma_user_id")
+            } else {
+                userDefaults.removeObject(forKey: "forma_user_id")
+            }
+            AIDataConsentManager.shared.refreshForCurrentUser()
+        }
+
+        userDefaults.set(userA, forKey: "forma_user_id")
+        AIDataConsentManager.shared.refreshForCurrentUser()
+        XCTAssertFalse(AIDataConsentManager.shared.hasGrantedConsent)
+        XCTAssertFalse(AIDataConsentManager.isConsentGranted)
+
+        // Sem consentimento, analyzeWorkout deve ser bloqueado antes de qualquer rede
+        do {
+            _ = try await GeminiAIService.shared.analyzeWorkout(description: "Supino reto 4x10", userWeight: 75.0)
+            XCTFail("Deveria exigir consentimento explícito antes de enviar dados para IA externa")
+        } catch let error as NSError {
+            XCTAssertEqual(error.code, 403)
+        }
+
+        // Sem consentimento, suggestInitialGoals deve calcular localmente via Mifflin-St Jeor sem falhar
+        let localGoals = await GeminiAIService.shared.suggestInitialGoals(
+            userName: "Atleta",
+            goal: .gain,
+            currentWeight: 74.0,
+            heightMeters: 1.78,
+            targetWeight: nil,
+            activityLevel: "Moderado (3-4x/semana)"
+        )
+        XCTAssertGreaterThanOrEqual(localGoals.dailyCalories, 1000)
+
+        // Concede para User A e garante que User B começa sem consentimento
+        AIDataConsentManager.shared.setConsent(true)
+        XCTAssertTrue(AIDataConsentManager.shared.hasGrantedConsent)
+        XCTAssertTrue(AIDataConsentManager.isConsentGranted)
+
+        userDefaults.set(userB, forKey: "forma_user_id")
+        AIDataConsentManager.shared.refreshForCurrentUser()
+        XCTAssertFalse(AIDataConsentManager.shared.hasGrantedConsent)
+        XCTAssertFalse(AIDataConsentManager.isConsentGranted)
+
+        // Retorna para User A e testa revogação/limpeza
+        userDefaults.set(userA, forKey: "forma_user_id")
+        AIDataConsentManager.shared.refreshForCurrentUser()
+        XCTAssertTrue(AIDataConsentManager.shared.hasGrantedConsent)
+
+        AIDataConsentManager.shared.clearConsentForCurrentUser()
+        XCTAssertFalse(AIDataConsentManager.shared.hasGrantedConsent)
+        XCTAssertFalse(AIDataConsentManager.isConsentGranted)
+    }
 }

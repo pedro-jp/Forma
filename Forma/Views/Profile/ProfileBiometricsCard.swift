@@ -303,6 +303,20 @@ struct ProfileBiometricsCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
+
+                    HStack(spacing: 10) {
+                        if let mifflinURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/") {
+                            Link("Fonte TMB: Mifflin-St Jeor", destination: mifflinURL)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(FormaTheme.Colors.brand)
+                        }
+                        if let issnURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/28642676/") {
+                            Link("Macros: ISSN (PubMed)", destination: issnURL)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(FormaTheme.Colors.brand)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
                 .padding(.vertical, 2)
             }

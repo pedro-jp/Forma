@@ -31,6 +31,7 @@ public class AdminUserService {
     private final UserActivityLogRepository userActivityLogRepository;
     private final AiRequestLogRepository aiRequestLogRepository;
     private final AuthService authService;
+    private final SocialAuthVerificationService socialAuthVerificationService;
     private final AdminEventPublisherService adminEventPublisherService;
 
     public AdminUserService(
@@ -45,6 +46,7 @@ public class AdminUserService {
         UserActivityLogRepository userActivityLogRepository,
         AiRequestLogRepository aiRequestLogRepository,
         AuthService authService,
+        SocialAuthVerificationService socialAuthVerificationService,
         AdminEventPublisherService adminEventPublisherService
     ) {
         this.userRepository = userRepository;
@@ -58,6 +60,7 @@ public class AdminUserService {
         this.userActivityLogRepository = userActivityLogRepository;
         this.aiRequestLogRepository = aiRequestLogRepository;
         this.authService = authService;
+        this.socialAuthVerificationService = socialAuthVerificationService;
         this.adminEventPublisherService = adminEventPublisherService;
     }
 
@@ -257,7 +260,19 @@ public class AdminUserService {
 
     @Transactional
     public void deleteUserPermanently(UUID userId) {
+        deleteUserPermanently(userId, null);
+    }
+
+    @Transactional
+    public void deleteUserPermanently(UUID userId, String appleAuthorizationCode) {
         User user = findUserOrThrow(userId);
+
+        if ("APPLE".equalsIgnoreCase(user.getAuthProvider()) && socialAuthVerificationService != null) {
+            socialAuthVerificationService.revokeAppleTokensOnAccountDeletion(
+                user.getAppleRefreshToken(),
+                appleAuthorizationCode
+            );
+        }
 
         foodEntryRepository.deleteByUserId(userId);
         workoutEntryRepository.deleteByUserId(userId);

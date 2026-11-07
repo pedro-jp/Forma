@@ -16,10 +16,12 @@ struct AIWorkoutLoggerView: View {
     
     @ObservedObject private var geminiService = GeminiAIService.shared
     @ObservedObject private var voiceService = VoiceRecognitionService.shared
+    @ObservedObject private var aiConsent = AIDataConsentManager.shared
     
     @State private var inputText: String = ""
     @State private var analyzedWorkout: AIExtractedWorkout? = nil
     @State private var errorMessage: String? = nil
+    @State private var showAIConsentSheet: Bool = false
     
     // Estados de Ações
     @State private var isSavedAsRoutine: Bool = false
@@ -89,6 +91,11 @@ struct AIWorkoutLoggerView: View {
                     showCatalogSheet = false
                 }
             }
+            .sheet(isPresented: $showAIConsentSheet) {
+                AIDataConsentSheet {
+                    performWorkoutAnalysis()
+                }
+            }
             .onChange(of: voiceService.recognizedText) { _, newText in
                 if voiceService.listeningMode == .workout && !newText.isEmpty {
                     inputText = newText
@@ -129,7 +136,7 @@ struct AIWorkoutLoggerView: View {
                 Text("Análise de Treino & Gasto Calórico")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(Color("FontNormal"))
-                Text("Calculado pela Inteligência Forma para o seu peso (\(Int(userWeight)) kg)")
+                Text("Calculado com IA Google Gemini & Compendium METs para \(Int(userWeight)) kg")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -574,6 +581,15 @@ struct AIWorkoutLoggerView: View {
     }
     
     private func analyzeWorkoutText() {
+        guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        if !aiConsent.hasGrantedConsent {
+            showAIConsentSheet = true
+            return
+        }
+        performWorkoutAnalysis()
+    }
+
+    private func performWorkoutAnalysis() {
         guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         errorMessage = nil
         isSavedAsRoutine = false

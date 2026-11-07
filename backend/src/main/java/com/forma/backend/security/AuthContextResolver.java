@@ -42,7 +42,7 @@ public class AuthContextResolver {
         AppConfigService appConfigService,
         AiRequestLogRepository aiRequestLogRepository,
         @Value("${app.admin.password:admin123}") String configuredAdminPassword,
-        @Value("${app.admin.key:admin123}") String configuredAdminKey
+        @Value("${app.admin.key:}") String configuredAdminKey
     ) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
@@ -148,7 +148,13 @@ public class AuthContextResolver {
         }
         if (headerKey != null && !headerKey.isBlank()) {
             String trimmed = headerKey.trim();
-            return trimmed.equals(configuredAdminKey.trim()) || trimmed.equals(configuredAdminPassword.trim());
+            boolean matchesKey = configuredAdminKey != null
+                && !configuredAdminKey.trim().isEmpty()
+                && trimmed.equals(configuredAdminKey.trim());
+            boolean matchesPassword = configuredAdminPassword != null
+                && !configuredAdminPassword.trim().isEmpty()
+                && trimmed.equals(configuredAdminPassword.trim());
+            return matchesKey || matchesPassword;
         }
 
         return false;

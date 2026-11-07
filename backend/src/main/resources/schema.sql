@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255),
     auth_provider VARCHAR(50) NOT NULL DEFAULT 'EMAIL', -- EMAIL, GOOGLE, APPLE
     provider_id VARCHAR(255),
+    apple_refresh_token VARCHAR(1024),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_login_at TIMESTAMP WITH TIME ZONE,
     last_synced_at TIMESTAMP WITH TIME ZONE

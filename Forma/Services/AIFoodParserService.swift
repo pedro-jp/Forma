@@ -199,7 +199,7 @@ public final class AIFoodParserService: Sendable {
         }
         
         // 2. ANÁLISE COM INTELIGÊNCIA ARTIFICIAL (Forçada pelo usuário ou Fallback quando item não consta na TACO após finalizar entrada)
-        if (allowCloudAI && GeminiConfig.shared.hasValidKey) || forceAI {
+        if AIDataConsentManager.isConsentGranted && ((allowCloudAI && GeminiConfig.shared.hasValidKey) || forceAI) {
             onPhaseChange?(.artificialIntelligence)
             // Intervalo suave para percepção visual da transição
             if !forceAI {

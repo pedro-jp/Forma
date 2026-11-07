@@ -26,6 +26,7 @@ struct LoginView: View {
     @State private var isGoogleAuthenticating: Bool = false
     @State private var showExistingAccountAlert: Bool = false
     @State private var pendingSocialSignIn: PendingSocialSignIn? = nil
+    @State private var acceptedTermsAndLGPD: Bool = false
 
     private struct PendingSocialSignIn {
         let provider: String
@@ -34,6 +35,7 @@ struct LoginView: View {
         let name: String
         let idToken: String?
         let nonce: String?
+        let authorizationCode: String?
         let existingEmail: String
     }
     
@@ -151,6 +153,37 @@ struct LoginView: View {
                                         .foregroundStyle(Color("AccentColor"))
                                 }
                             }
+                        } else {
+                            HStack(alignment: .top, spacing: 10) {
+                                Button {
+                                    acceptedTermsAndLGPD.toggle()
+                                } label: {
+                                    Image(systemName: acceptedTermsAndLGPD ? "checkmark.square.fill" : "square")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(acceptedTermsAndLGPD ? Color("AccentColor") : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 1)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Li e aceito a Política de Privacidade (LGPD), os Termos de Uso e o tratamento dos meus dados de bem-estar.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .onTapGesture {
+                                            acceptedTermsAndLGPD.toggle()
+                                        }
+                                    Button {
+                                        showLegalPrivacySheet = true
+                                    } label: {
+                                        Text("Ler Política, Termos (EULA) e Aviso de Saúde")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color("AccentColor"))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.top, 2)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -258,11 +291,11 @@ struct LoginView: View {
                     Button {
                         showLegalPrivacySheet = true
                     } label: {
-                        VStack(spacing: 3) {
-                            Text("Ao continuar, você concorda com nossos termos e avisos de saúde.")
+                        VStack(spacing: 4) {
+                            Text("Recursos de IA na nuvem utilizam o Google Gemini (Google LLC) mediante sua autorização.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text("Política de Privacidade, Saúde & Termos de Uso")
+                            Text("Ao continuar, você concorda com a Política de Privacidade (LGPD), Termos de Uso & Aviso de Saúde")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Color("AccentColor"))
                         }
@@ -298,6 +331,10 @@ struct LoginView: View {
     // MARK: - Tratamento de Ações
     private func handleEmailAuth() {
         localErrorMessage = nil
+        if isRegisterMode && !acceptedTermsAndLGPD {
+            localErrorMessage = "Marque o aceite da Política de Privacidade (LGPD) e dos Termos de Uso para criar sua conta."
+            return
+        }
         Task {
             do {
                 if isRegisterMode {
@@ -345,8 +382,9 @@ struct LoginView: View {
                 email = KeychainHelper.shared.loadString(key: "apple_email_\(userId)")
             }
             
-            // 3. Identity Token UTF-8 assinado pela Apple
+            // 3. Identity Token e Authorization Code UTF-8 assinados pela Apple
             let idToken = appleIDCredential.identityToken.flatMap { String(data: $0, encoding: .utf8) }
+            let authorizationCode = appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
             
             let resolvedName = fullName ?? "Usuário Apple"
             Task { @MainActor in
@@ -359,7 +397,8 @@ struct LoginView: View {
                         idToken: idToken,
                         nonce: rawNonce,
                         isRegisterIntent: isRegisterMode,
-                        confirmExisting: false
+                        confirmExisting: false,
+                        authorizationCode: authorizationCode
                     )
                     onLoginSuccess()
                 } catch FormaAPIError.accountAlreadyExists(_, let existingEmail, _) {
@@ -370,6 +409,7 @@ struct LoginView: View {
                         name: resolvedName,
                         idToken: idToken,
                         nonce: rawNonce,
+                        authorizationCode: authorizationCode,
                         existingEmail: existingEmail.isEmpty ? (email ?? "") : existingEmail
                     )
                     showExistingAccountAlert = true
@@ -419,6 +459,7 @@ struct LoginView: View {
                         name: resolvedName,
                         idToken: userResult.idToken,
                         nonce: rawNonce,
+                        authorizationCode: nil,
                         existingEmail: existingEmail.isEmpty ? (userResult.email ?? "") : existingEmail
                     )
                     showExistingAccountAlert = true
@@ -449,7 +490,8 @@ struct LoginView: View {
                     idToken: pending.idToken,
                     nonce: pending.nonce,
                     isRegisterIntent: false,
-                    confirmExisting: true
+                    confirmExisting: true,
+                    authorizationCode: pending.authorizationCode
                 )
                 onLoginSuccess()
             } catch {

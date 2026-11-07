@@ -435,7 +435,7 @@ public struct EvolutionAIAnalysis: Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
-        self.statusSummary = (try? container.decodeIfPresent(String.self, forKey: .statusSummary)) ?? "Diagnóstico Concluído"
+        self.statusSummary = (try? container.decodeIfPresent(String.self, forKey: .statusSummary)) ?? "Análise Concluída"
         self.calorieDiagnostic = (try? container.decodeIfPresent(String.self, forKey: .calorieDiagnostic)) ?? "Balanço calórico avaliado com sucesso."
         self.macroDiagnostic = (try? container.decodeIfPresent(String.self, forKey: .macroDiagnostic)) ?? "Distribuição de nutrientes equilibrada."
         self.hydrationDiagnostic = (try? container.decodeIfPresent(String.self, forKey: .hydrationDiagnostic)) ?? "Consumo de água avaliado."
@@ -741,18 +741,20 @@ public final class GeminiAIService: ObservableObject {
             body["targetWeight"] = targetWeight
         }
 
-        do {
-            let responseJson = try await sendBackendAiRequest(
-                path: "suggest-initial-goals",
-                body: body
-            )
-            if let data = responseJson.data(using: .utf8),
-               let decoded = try? JSONDecoder().decode(InitialGoalsAISuggestion.self, from: data),
-               decoded.dailyCalories >= 1000 {
-                return decoded
+        if AIDataConsentManager.isConsentGranted {
+            do {
+                let responseJson = try await sendBackendAiRequest(
+                    path: "suggest-initial-goals",
+                    body: body
+                )
+                if let data = responseJson.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(InitialGoalsAISuggestion.self, from: data),
+                   decoded.dailyCalories >= 1000 {
+                    return decoded
+                }
+            } catch {
+                print("⚠️ [Gemini AI] Fallback fisiológico acionado para metas iniciais: \(error.localizedDescription)")
             }
-        } catch {
-            print("⚠️ [Gemini AI] Fallback fisiológico acionado para metas iniciais: \(error.localizedDescription)")
         }
 
         // Cálculo fisiológico local equivalente (Mifflin-St Jeor + objetivo + nível de atividade) caso offline temporário
@@ -800,6 +802,13 @@ public final class GeminiAIService: ObservableObject {
     // MARK: - Comunicação HTTP Segura via Backend Java (Proxy de IA)
     
     private func sendBackendAiRequest(path: String, body: [String: Any]) async throws -> String {
+        guard AIDataConsentManager.isConsentGranted else {
+            throw NSError(
+                domain: "GeminiAI",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "Autorize o uso da IA externa nas configurações de Privacidade & Saúde para continuar."]
+            )
+        }
         let data = try await FormaAPIClient.shared.requestData(
             path: "/api/ai/\(path)",
             method: "POST",

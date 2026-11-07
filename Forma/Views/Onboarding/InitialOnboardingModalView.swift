@@ -11,6 +11,7 @@ import SwiftUI
 
 struct InitialOnboardingModalView: View {
     @ObservedObject private var authManager = AuthManager.shared
+    @ObservedObject private var aiConsent = AIDataConsentManager.shared
 
     enum ActivityLevelOption: String, CaseIterable, Identifiable {
         case light = "Leve (1-2x/semana)"
@@ -63,6 +64,7 @@ struct InitialOnboardingModalView: View {
     @State private var lastAISignature: String = ""
     @State private var isSavingToDatabase: Bool = false
     @State private var saveErrorMessage: String? = nil
+    @State private var showAIConsentSheet: Bool = false
 
     // MARK: - Parsers & Validações Estritas
 
@@ -184,6 +186,11 @@ struct InitialOnboardingModalView: View {
             }
             .onChange(of: selectedActivity) { _, _ in
                 scheduleAutoAISuggestion(immediate: true)
+            }
+            .sheet(isPresented: $showAIConsentSheet) {
+                AIDataConsentSheet {
+                    triggerAISuggestionNow(forceTargetWeightRefresh: !hasManuallyEditedTargetWeight)
+                }
             }
         }
         .interactiveDismissDisabled(true)
@@ -383,10 +390,14 @@ struct InitialOnboardingModalView: View {
     private var aiGoalsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                sectionTitle("3. Metas Diárias com IA", icon: "sparkles")
+                sectionTitle("3. Metas Diárias", icon: "sparkles")
                 Spacer()
                 Button {
-                    triggerAISuggestionNow(forceTargetWeightRefresh: !hasManuallyEditedTargetWeight)
+                    if aiConsent.hasGrantedConsent {
+                        triggerAISuggestionNow(forceTargetWeightRefresh: !hasManuallyEditedTargetWeight)
+                    } else {
+                        showAIConsentSheet = true
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         if isLoadingAISuggestion {
@@ -397,7 +408,7 @@ struct InitialOnboardingModalView: View {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 11, weight: .bold))
                         }
-                        Text(isLoadingAISuggestion ? "Calculando..." : "Sugerir com IA")
+                        Text(isLoadingAISuggestion ? "Calculando..." : "IA Google Gemini")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                     }
                     .foregroundStyle(.white)
@@ -414,11 +425,24 @@ struct InitialOnboardingModalView: View {
                 .disabled(validCurrentWeight == nil || validHeight == nil || isLoadingAISuggestion)
             }
 
+            HStack(spacing: 6) {
+                Image(systemName: aiConsent.hasGrantedConsent ? "sparkles" : "function")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(aiConsent.hasGrantedConsent ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand)
+                Text(aiConsent.hasGrantedConsent
+                     ? "Sugestões ativas via IA do Google Gemini (Google LLC)"
+                     : "Cálculo local (Mifflin-St Jeor) • Toque em \"IA Google Gemini\" para ativar a IA na nuvem")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             if isLoadingAISuggestion {
                 HStack(spacing: 10) {
                     ProgressView()
                         .tint(FormaTheme.Colors.aiAccent)
-                    Text("A Inteligência Forma está calculando suas metas personalizadas...")
+                    Text(aiConsent.hasGrantedConsent
+                         ? "A IA do Google Gemini está calculando suas metas personalizadas..."
+                         : "Calculando suas metas fisiológicas iniciais...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -576,6 +600,25 @@ struct InitialOnboardingModalView: View {
             }
             .buttonStyle(.plain)
             .disabled(!isFormCompletelyValid || isSavingToDatabase)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Estimativas de IMC, TMB e macronutrientes têm finalidade informativa e educacional e não substituem avaliação médica ou nutricional.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    if let mifflinURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/") {
+                        Link("Fonte TMB: Mifflin-St Jeor (PubMed)", destination: mifflinURL)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+                    if let whoURL = URL(string: "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight") {
+                        Link("Fonte IMC: OMS (WHO)", destination: whoURL)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+                }
+            }
+            .padding(.top, 2)
         }
     }
 
