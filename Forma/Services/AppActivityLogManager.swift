@@ -166,6 +166,7 @@ public final class AppActivityLogManager: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self = self else { return }
             var records = self.readAllRecords()
+            records.removeAll { $0.id.caseInsensitiveCompare(record.id) == .orderedSame }
             records.append(record)
             // Mantém os últimos 1000 registros para alta performance
             if records.count > 1000 {

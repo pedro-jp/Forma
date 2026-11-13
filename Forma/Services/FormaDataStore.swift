@@ -290,6 +290,71 @@ public final class FormaDataStore {
         }
     }
 
+    @discardableResult
+    func updateFoodEntriesMealType(
+        _ entries: [FoodEntry],
+        to targetMeal: MealType,
+        in context: ModelContext? = nil
+    ) -> Int {
+        let entriesToMove = entries.filter { $0.mealType != targetMeal }
+        guard !entriesToMove.isEmpty else { return 0 }
+
+        let ctx = context ?? mainContext
+        for entry in entriesToMove {
+            entry.mealType = targetMeal
+            if !isInMemoryStore {
+                AppActivityLogManager.shared.logMeal(
+                    id: entry.id.uuidString,
+                    name: entry.name,
+                    mealType: targetMeal.rawValue,
+                    calories: entry.calories,
+                    protein: entry.protein,
+                    carbs: entry.carbohydrates,
+                    fat: entry.fat,
+                    isSnack: targetMeal == .snacks,
+                    date: entry.date
+                )
+            }
+        }
+
+        recalculateProfileWithFullContext(in: ctx)
+        try? ctx.save()
+        syncTodayData(skipCloudSyncTrigger: true)
+
+        if !isInMemoryStore && AuthManager.shared.isAuthenticated {
+            Task { @MainActor in
+                try? await BackendSyncManager.shared.pushFoodsRemoteFirst(entriesToMove)
+            }
+        }
+        return entriesToMove.count
+    }
+
+    @discardableResult
+    func handleFoodDropPayloads(
+        _ payloads: [String],
+        to targetMeal: MealType,
+        candidateEntries: [FoodEntry],
+        in context: ModelContext? = nil
+    ) -> Int {
+        var resolvedById: [UUID: FoodEntry] = [:]
+        for raw in payloads {
+            guard let decoded = FoodDragTransferPayload.decode(raw) else { continue }
+            switch decoded {
+            case .food(let id):
+                if let match = candidateEntries.first(where: { $0.id == id }) {
+                    resolvedById[match.id] = match
+                }
+            case .mealGroup(let sourceMeal):
+                guard sourceMeal != targetMeal else { continue }
+                for match in candidateEntries where match.mealType == sourceMeal {
+                    resolvedById[match.id] = match
+                }
+            }
+        }
+
+        return updateFoodEntriesMealType(Array(resolvedById.values), to: targetMeal, in: context)
+    }
+
     // MARK: - Motor de Contexto Completo para Recálculo Fisiológico
 
     func buildRecalculationContext(in context: ModelContext? = nil) -> RecalculationContext {

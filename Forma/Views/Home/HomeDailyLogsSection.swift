@@ -18,6 +18,8 @@ struct HomeDailyLogsSection: View {
     let onOpenCameraTap: () -> Void
     let onAddMealTap: () -> Void
     let onDeleteFood: (FoodEntry) -> Void
+    var onMoveFoodToMeal: ((FoodEntry, MealType) -> Void)? = nil
+    var onDropFoodsToMeal: (([String], MealType) -> Bool)? = nil
     let onAddWorkoutTap: () -> Void
     var onDeleteWorkout: ((WorkoutEntry) -> Void)? = nil
     let onLogWeightTap: () -> Void
@@ -96,39 +98,69 @@ struct HomeDailyLogsSection: View {
                     )
                 } else {
                     VStack(spacing: 10) {
+                        if let onDropFoodsToMeal {
+                            MealQuickDropBar(onDropPayloads: onDropFoodsToMeal)
+                        }
+
                         ForEach(foodsToday) { food in
                             HStack(alignment: .center, spacing: 8) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 6) {
-                                        Text(food.name)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(FormaTheme.Colors.primaryText)
-                                            .lineLimit(2)
-                                        Text(food.mealType.rawValue)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(FormaTheme.Colors.brand)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(FormaTheme.Colors.brandSoft)
-                                            .clipShape(Capsule())
+                                HStack(alignment: .center, spacing: 8) {
+                                    Image(systemName: "line.3.horizontal")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.secondary.opacity(0.45))
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(food.name)
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .foregroundStyle(FormaTheme.Colors.primaryText)
+                                                .lineLimit(2)
+
+                                            if let onMoveFoodToMeal {
+                                                Menu {
+                                                    ForEach(MealType.allCases) { targetMeal in
+                                                        Button {
+                                                            onMoveFoodToMeal(food, targetMeal)
+                                                        } label: {
+                                                            Label(
+                                                                targetMeal.rawValue,
+                                                                systemImage: targetMeal == food.mealType ? "checkmark" : targetMeal.icon
+                                                            )
+                                                        }
+                                                        .disabled(targetMeal == food.mealType)
+                                                    }
+                                                } label: {
+                                                    mealTypeBadge(food.mealType)
+                                                }
+                                                .buttonStyle(.plain)
+                                            } else {
+                                                mealTypeBadge(food.mealType)
+                                            }
+                                        }
+
+                                        Text("\(Int(food.portionGrams))g • P \(Int(food.protein))g  C \(Int(food.carbohydrates))g  G \(Int(food.fat))g")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                             .lineLimit(1)
-                                            .fixedSize(horizontal: true, vertical: false)
+                                            .minimumScaleFactor(0.85)
                                     }
 
-                                    Text("\(Int(food.portionGrams))g • P \(Int(food.protein))g  C \(Int(food.carbohydrates))g  G \(Int(food.fat))g")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 6)
+
+                                    Text("\(Int(food.calories.rounded())) kcal")
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                                        .foregroundStyle(FormaTheme.Colors.primaryText)
                                         .lineLimit(1)
-                                        .minimumScaleFactor(0.85)
+                                        .fixedSize(horizontal: true, vertical: false)
                                 }
-
-                                Spacer(minLength: 6)
-
-                                Text("\(Int(food.calories.rounded())) kcal")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundStyle(FormaTheme.Colors.primaryText)
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
+                                .contentShape(Rectangle())
+                                .draggable(FoodDragTransferPayload.encodeFood(food.id)) {
+                                    FoodDragPreviewCard(
+                                        title: food.name,
+                                        subtitle: "\(Int(food.calories.rounded())) kcal • \(food.mealType.shortTitle)",
+                                        icon: food.mealType.icon
+                                    )
+                                }
 
                                 Button {
                                     onDeleteFood(food)
@@ -150,6 +182,18 @@ struct HomeDailyLogsSection: View {
                 }
             }
         }
+    }
+
+    private func mealTypeBadge(_ mealType: MealType) -> some View {
+        Text(mealType.rawValue)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(FormaTheme.Colors.brand)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(FormaTheme.Colors.brandSoft)
+            .clipShape(Capsule())
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var stepsCard: some View {

@@ -162,6 +162,32 @@ struct HomeView: View {
                             FormaDataStore.shared.deleteFoodEntry(food, in: modelContext)
                             syncWidgetsAndLiveActivity()
                         },
+                        onMoveFoodToMeal: { food, targetMeal in
+                            let movedCount = FormaDataStore.shared.updateFoodEntriesMealType(
+                                [food],
+                                to: targetMeal,
+                                in: modelContext
+                            )
+                            if movedCount > 0 {
+                                syncWidgetsAndLiveActivity()
+                                AuthManager.shared.showRealtimeToast("Movido para \(targetMeal.rawValue)")
+                            }
+                        },
+                        onDropFoodsToMeal: { payloads, targetMeal in
+                            let movedCount = FormaDataStore.shared.handleFoodDropPayloads(
+                                payloads,
+                                to: targetMeal,
+                                candidateEntries: foodsToday,
+                                in: modelContext
+                            )
+                            if movedCount > 0 {
+                                syncWidgetsAndLiveActivity()
+                                let label = movedCount == 1 ? "1 item movido" : "\(movedCount) itens movidos"
+                                AuthManager.shared.showRealtimeToast("\(label) para \(targetMeal.rawValue)")
+                                return true
+                            }
+                            return false
+                        },
                         onAddWorkoutTap: { showAddWorkoutSheet = true },
                         onDeleteWorkout: { workout in
                             FormaDataStore.shared.deleteWorkoutEntry(workout, in: modelContext)

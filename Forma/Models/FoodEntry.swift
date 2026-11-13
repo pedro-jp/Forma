@@ -24,6 +24,48 @@ public enum MealType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .snacks: return "cup.and.saucer.fill"
         }
     }
+
+    public var shortTitle: String {
+        switch self {
+        case .breakfast: return "Café"
+        case .lunch: return "Almoço"
+        case .dinner: return "Jantar"
+        case .snacks: return "Lanches"
+        }
+    }
+}
+
+public enum FoodDragTransferPayload: Sendable {
+    public nonisolated static let foodPrefix = "forma-food:"
+    public nonisolated static let mealGroupPrefix = "forma-meal-group:"
+
+    public enum Decoded: Sendable, Equatable {
+        case food(UUID)
+        case mealGroup(MealType)
+    }
+
+    public nonisolated static func encodeFood(_ id: UUID) -> String {
+        "\(foodPrefix)\(id.uuidString)"
+    }
+
+    public nonisolated static func encodeMealGroup(_ mealType: MealType) -> String {
+        "\(mealGroupPrefix)\(mealType.rawValue)"
+    }
+
+    public nonisolated static func decode(_ raw: String) -> Decoded? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(foodPrefix) {
+            let idString = String(trimmed.dropFirst(foodPrefix.count))
+            guard let uuid = UUID(uuidString: idString) else { return nil }
+            return .food(uuid)
+        }
+        if trimmed.hasPrefix(mealGroupPrefix) {
+            let mealRaw = String(trimmed.dropFirst(mealGroupPrefix.count))
+            guard let mealType = MealType(rawValue: mealRaw) else { return nil }
+            return .mealGroup(mealType)
+        }
+        return nil
+    }
 }
 
 @Model

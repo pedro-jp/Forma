@@ -160,6 +160,18 @@ struct NutritionView: View {
                     )
 
                     VStack(spacing: 14) {
+                        if !foodsForSelectedDate.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "hand.draw.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("Segure e arraste um item ou refeição para mover de horário")
+                                    .font(.caption2.weight(.medium))
+                            }
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                        }
+
                         ForEach(MealType.allCases) { meal in
                             MealSectionCard(
                                 mealType: meal,
@@ -176,6 +188,20 @@ struct NutritionView: View {
                                 } : nil,
                                 onDeleteEntry: { entry in
                                     FormaDataStore.shared.deleteFoodEntry(entry, in: modelContext)
+                                },
+                                onDropPayloads: { payloads in
+                                    let movedCount = FormaDataStore.shared.handleFoodDropPayloads(
+                                        payloads,
+                                        to: meal,
+                                        candidateEntries: foodsForSelectedDate,
+                                        in: modelContext
+                                    )
+                                    if movedCount > 0 {
+                                        let label = movedCount == 1 ? "1 item movido" : "\(movedCount) itens movidos"
+                                        AuthManager.shared.showRealtimeToast("\(label) para \(meal.rawValue)")
+                                        return true
+                                    }
+                                    return false
                                 }
                             )
                         }
