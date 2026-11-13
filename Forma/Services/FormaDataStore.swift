@@ -355,6 +355,52 @@ public final class FormaDataStore {
         return updateFoodEntriesMealType(Array(resolvedById.values), to: targetMeal, in: context)
     }
 
+    func updateFoodEntry(
+        _ entry: FoodEntry,
+        portionGrams: Double,
+        mealType: MealType,
+        in context: ModelContext? = nil
+    ) {
+        let clampedPortion = max(1.0, portionGrams)
+        let ctx = context ?? mainContext
+
+        if entry.portionGrams > 0, abs(clampedPortion - entry.portionGrams) >= 0.1 {
+            let factor = clampedPortion / entry.portionGrams
+            entry.calories = max(0, entry.calories * factor)
+            entry.protein = max(0, entry.protein * factor)
+            entry.carbohydrates = max(0, entry.carbohydrates * factor)
+            entry.fat = max(0, entry.fat * factor)
+            entry.portionGrams = clampedPortion
+        } else if entry.portionGrams <= 0 {
+            entry.portionGrams = clampedPortion
+        }
+        entry.mealType = mealType
+
+        if !isInMemoryStore {
+            AppActivityLogManager.shared.logMeal(
+                id: entry.id.uuidString,
+                name: entry.name,
+                mealType: mealType.rawValue,
+                calories: entry.calories,
+                protein: entry.protein,
+                carbs: entry.carbohydrates,
+                fat: entry.fat,
+                isSnack: mealType == .snacks,
+                date: entry.date
+            )
+        }
+
+        recalculateProfileWithFullContext(in: ctx)
+        try? ctx.save()
+        syncTodayData(skipCloudSyncTrigger: true)
+
+        if !isInMemoryStore && AuthManager.shared.isAuthenticated {
+            Task { @MainActor in
+                try? await BackendSyncManager.shared.pushFoodsRemoteFirst([entry])
+            }
+        }
+    }
+
     // MARK: - Motor de Contexto Completo para Recálculo Fisiológico
 
     func buildRecalculationContext(in context: ModelContext? = nil) -> RecalculationContext {

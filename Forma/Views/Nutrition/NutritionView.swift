@@ -20,6 +20,8 @@ struct NutritionView: View {
     @State private var showVoiceFoodSheet: Bool = false
     @State private var openCameraDirectly: Bool = false
     @State private var mealToAdd: MealType = .lunch
+    @State private var editingFood: FoodEntry? = nil
+    @State private var showDatePickerSheet: Bool = false
     @ObservedObject private var authManager = AuthManager.shared
 
     private var profile: Profile? { profiles.first }
@@ -27,9 +29,16 @@ struct NutritionView: View {
     private var currentWeekDays: [Date] {
         var calendar = Calendar.current
         calendar.firstWeekday = 2
-        let now = Date()
-        let startOfWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? calendar.startOfDay(for: now)
+        let startOfWeek = calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? calendar.startOfDay(for: selectedDate)
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfWeek) }
+    }
+
+    private func shiftSelectedDate(byDays days: Int) {
+        if let target = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) {
+            withAnimation(.spring(duration: 0.25)) {
+                selectedDate = target
+            }
+        }
     }
 
     private func hasFoodLogged(on date: Date) -> Bool {
@@ -189,6 +198,9 @@ struct NutritionView: View {
                                 onDeleteEntry: { entry in
                                     FormaDataStore.shared.deleteFoodEntry(entry, in: modelContext)
                                 },
+                                onEditEntry: { entry in
+                                    editingFood = entry
+                                },
                                 onDropPayloads: { payloads in
                                     let movedCount = FormaDataStore.shared.handleFoodDropPayloads(
                                         payloads,
@@ -226,50 +238,187 @@ struct NutritionView: View {
                 }
                 .environment(\.modelContext, modelContext)
             }
+            .sheet(item: $editingFood) { food in
+                FoodQuickEditSheet(
+                    entry: food,
+                    onSave: { newPortion, newMeal in
+                        FormaDataStore.shared.updateFoodEntry(
+                            food,
+                            portionGrams: newPortion,
+                            mealType: newMeal,
+                            in: modelContext
+                        )
+                        AuthManager.shared.showRealtimeToast("Refeição atualizada")
+                    },
+                    onDelete: {
+                        FormaDataStore.shared.deleteFoodEntry(food, in: modelContext)
+                        AuthManager.shared.showRealtimeToast("Alimento removido")
+                    }
+                )
+            }
+            .sheet(isPresented: $showDatePickerSheet) {
+                NavigationStack {
+                    VStack(spacing: 12) {
+                        DatePicker(
+                            "Selecionar data",
+                            selection: $selectedDate,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        .tint(FormaTheme.Colors.brand)
+                        .environment(\.locale, Locale(identifier: "pt_BR"))
+                        .padding(.horizontal, 12)
+
+                        Spacer()
+                    }
+                    .navigationTitle("Escolher Data")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Hoje") {
+                                withAnimation(.spring(duration: 0.25)) {
+                                    selectedDate = Date()
+                                }
+                                showDatePickerSheet = false
+                            }
+                            .fontWeight(.semibold)
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Pronto") {
+                                showDatePickerSheet = false
+                            }
+                            .fontWeight(.bold)
+                        }
+                    }
+                }
+                .presentationDetents([.height(420)])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(24)
+            }
         }
     }
 
     private var weeklyCalendarStrip: some View {
-        FormaCard(padding: 8, cornerRadius: 18) {
-            HStack(spacing: 6) {
-                let calendar = Calendar.current
-                ForEach(currentWeekDays, id: \.self) { day in
-                    let isSelected = calendar.isDate(day, inSameDayAs: selectedDate)
-                    let isToday = calendar.isDateInToday(day)
-                    let logged = hasFoodLogged(on: day)
-                    let dayLetter = day.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: "pt_BR")))
-                        .replacingOccurrences(of: ".", with: "")
-                        .capitalized
-                    let dayNumber = day.formatted(.dateTime.day())
+        let isTodaySelected = Calendar.current.isDateInToday(selectedDate)
+        let monthTitle = selectedDate
+            .formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "pt_BR")))
+            .capitalized
+
+        return FormaCard(padding: 10, cornerRadius: 18) {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button {
+                        shiftSelectedDate(byDays: -7)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(Color.primary.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
 
                     Button {
-                        withAnimation(.spring(duration: 0.25)) {
-                            selectedDate = day
-                        }
+                        showDatePickerSheet = true
                     } label: {
-                        VStack(spacing: 4) {
-                            Text(dayLetter)
-                                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                                .foregroundStyle(isSelected ? FormaTheme.Colors.brand : .secondary)
-
-                            Text(dayNumber)
-                                .font(.system(size: 13, weight: isSelected || isToday ? .bold : .regular, design: .rounded))
-                                .foregroundStyle(isSelected ? .white : (isToday ? FormaTheme.Colors.brand : FormaTheme.Colors.primaryText))
-                                .frame(width: 34, height: 34)
-                                .background(
-                                    Circle()
-                                        .fill(isSelected ? FormaTheme.Colors.brand : (isToday ? FormaTheme.Colors.brandSoft : Color.clear))
-                                )
-
-                            Circle()
-                                .fill(logged ? FormaTheme.Colors.energyGreen : Color.clear)
-                                .frame(width: 5, height: 5)
+                        HStack(spacing: 5) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(FormaTheme.Colors.brand)
+                            Text(monthTitle)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(FormaTheme.Colors.primaryText)
+                                .lineLimit(1)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 4)
+
+                    if !isTodaySelected {
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                selectedDate = Date()
+                            }
+                        } label: {
+                            Text("Hoje")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(FormaTheme.Colors.brand)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(FormaTheme.Colors.brandSoft)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        shiftSelectedDate(byDays: 7)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(Color.primary.opacity(0.05))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 4)
+
+                HStack(spacing: 6) {
+                    let calendar = Calendar.current
+                    ForEach(currentWeekDays, id: \.self) { day in
+                        let isSelected = calendar.isDate(day, inSameDayAs: selectedDate)
+                        let isToday = calendar.isDateInToday(day)
+                        let logged = hasFoodLogged(on: day)
+                        let dayLetter = day.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: "pt_BR")))
+                            .replacingOccurrences(of: ".", with: "")
+                            .capitalized
+                        let dayNumber = day.formatted(.dateTime.day())
+
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                selectedDate = day
+                            }
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(dayLetter)
+                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                    .foregroundStyle(isSelected ? FormaTheme.Colors.brand : .secondary)
+
+                                Text(dayNumber)
+                                    .font(.system(size: 13, weight: isSelected || isToday ? .bold : .regular, design: .rounded))
+                                    .foregroundStyle(isSelected ? .white : (isToday ? FormaTheme.Colors.brand : FormaTheme.Colors.primaryText))
+                                    .frame(width: 34, height: 34)
+                                    .background(
+                                        Circle()
+                                            .fill(isSelected ? FormaTheme.Colors.brand : (isToday ? FormaTheme.Colors.brandSoft : Color.clear))
+                                    )
+
+                                Circle()
+                                    .fill(logged ? FormaTheme.Colors.energyGreen : Color.clear)
+                                    .frame(width: 5, height: 5)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 35)
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            if value.translation.width < -45 {
+                                shiftSelectedDate(byDays: 7)
+                            } else if value.translation.width > 45 {
+                                shiftSelectedDate(byDays: -7)
+                            }
+                        }
+                )
             }
         }
     }
@@ -363,9 +512,11 @@ struct NutritionView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("P \(pPct)% • C \(cPct)% • G \(fPct)%")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    macroLegendDot(color: FormaTheme.Colors.protein, text: "P \(pPct)%")
+                    macroLegendDot(color: FormaTheme.Colors.carbs, text: "C \(cPct)%")
+                    macroLegendDot(color: FormaTheme.Colors.fat, text: "G \(fPct)%")
+                }
             }
 
             GeometryReader { geo in
@@ -382,6 +533,17 @@ struct NutritionView: View {
                 }
             }
             .frame(height: 5)
+        }
+    }
+
+    private func macroLegendDot(color: Color, text: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
         }
     }
 

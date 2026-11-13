@@ -14,10 +14,14 @@ struct HomeDailyLogsSection: View {
     let steps: Double
     let stepsTarget: Double
     let distanceKm: Double
+    var currentWeight: Double = 72.0
+    var targetWeight: Double = 80.0
+    var recentWeightDelta: Double? = nil
     let onClearMealsTap: () -> Void
     let onOpenCameraTap: () -> Void
     let onAddMealTap: () -> Void
     let onDeleteFood: (FoodEntry) -> Void
+    var onEditFood: ((FoodEntry) -> Void)? = nil
     var onMoveFoodToMeal: ((FoodEntry, MealType) -> Void)? = nil
     var onDropFoodsToMeal: (([String], MealType) -> Bool)? = nil
     let onAddWorkoutTap: () -> Void
@@ -29,7 +33,7 @@ struct HomeDailyLogsSection: View {
             mealsTodayCard
             stepsCard
             workoutsTodayCard
-            quickActionsRow
+            bodyWeightCard
         }
     }
 
@@ -138,7 +142,8 @@ struct HomeDailyLogsSection: View {
                                             }
                                         }
 
-                                        Text("\(Int(food.portionGrams))g • P \(Int(food.protein))g  C \(Int(food.carbohydrates))g  G \(Int(food.fat))g")
+                                        let unitLabel = food.brand.lowercased().contains("ml") ? "ml" : "g"
+                                        Text("\(Int(food.portionGrams))\(unitLabel) • P \(Int(food.protein))g  C \(Int(food.carbohydrates))g  G \(Int(food.fat))g")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
@@ -152,8 +157,15 @@ struct HomeDailyLogsSection: View {
                                         .foregroundStyle(FormaTheme.Colors.primaryText)
                                         .lineLimit(1)
                                         .fixedSize(horizontal: true, vertical: false)
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
                                 }
                                 .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onEditFood?(food)
+                                }
                                 .draggable(FoodDragTransferPayload.encodeFood(food.id)) {
                                     FoodDragPreviewCard(
                                         title: food.name,
@@ -161,16 +173,6 @@ struct HomeDailyLogsSection: View {
                                         icon: food.mealType.icon
                                     )
                                 }
-
-                                Button {
-                                    onDeleteFood(food)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(FormaTheme.Colors.danger.opacity(0.65))
-                                        .padding(4)
-                                }
-                                .buttonStyle(.borderless)
                             }
                             .padding(.vertical, 2)
 
@@ -295,15 +297,19 @@ struct HomeDailyLogsSection: View {
                                     .lineLimit(1)
                                     .fixedSize(horizontal: true, vertical: false)
                                 if let onDeleteWorkout {
-                                    Button {
-                                        onDeleteWorkout(workout)
+                                    Menu {
+                                        Button(role: .destructive) {
+                                            onDeleteWorkout(workout)
+                                        } label: {
+                                            Label("Remover treino", systemImage: "trash")
+                                        }
                                     } label: {
-                                        Image(systemName: "trash")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(FormaTheme.Colors.danger.opacity(0.65))
-                                            .padding(4)
+                                        Image(systemName: "ellipsis")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 28, height: 28)
                                     }
-                                    .buttonStyle(.borderless)
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.vertical, 2)
@@ -312,6 +318,65 @@ struct HomeDailyLogsSection: View {
                 }
             }
         }
+    }
+
+    private var bodyWeightCard: some View {
+        FormaCard(padding: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "scalemass.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .foregroundStyle(FormaTheme.Colors.bodyWeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(FormaTheme.Colors.bodyWeight.opacity(0.12))
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Peso Corporal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(String(format: "%.1f kg", currentWeight))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                            .contentTransition(.numericText())
+
+                        Text(String(format: "Meta %.1f kg", targetWeight))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if let delta = recentWeightDelta, abs(delta) >= 0.05 {
+                        Text(String(format: "%@%.1f kg recente", delta > 0 ? "+" : "", delta))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.bodyWeight)
+                    }
+                }
+
+                Spacer(minLength: 6)
+
+                Button(action: onLogWeightTap) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Pesagem")
+                            .font(.caption.weight(.bold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(FormaTheme.Colors.bodyWeight)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(FormaTheme.Colors.bodyWeight.opacity(0.13))
+                    .clipShape(Capsule())
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 22)
     }
 
     private var quickActionsRow: some View {

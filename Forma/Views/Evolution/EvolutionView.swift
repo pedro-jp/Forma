@@ -38,7 +38,6 @@ struct EvolutionView: View {
 
     @State private var showLogWeight: Bool = false
     @State private var showAIConsentSheet: Bool = false
-    @State private var toastMessage: String? = nil
 
     @State private var isAnalyzingAI: Bool = false
     @State private var aiAnalysis: EvolutionAIAnalysis? = nil
@@ -118,55 +117,37 @@ struct EvolutionView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if let toast = toastMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.white)
-                        Text(toast)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity)
-                    .background(FormaTheme.Colors.energyGreen)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+            ScrollView {
+                VStack(spacing: FormaTheme.Spacing.sectionGap) {
+                    evolutionHeaderSection
+                        .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
 
-                topHeaderBar
-
-                Divider().background(Color.primary.opacity(0.08))
-
-                ScrollView {
-                    VStack(spacing: FormaTheme.Spacing.sectionGap) {
-                        if authManager.isPro {
-                            switch selectedSection {
-                            case .overview:
-                                overviewSectionView
-                            case .aiAnalysis:
-                                EvolutionAICoachSection(
-                                    analysis: aiAnalysis,
-                                    isAnalyzing: isAnalyzingAI,
-                                    errorMessage: aiErrorMessage,
-                                    appliedTargetsSuccessfully: appliedTargetsSuccessfully,
-                                    savedRoutineSuccessfully: savedRoutineSuccessfully,
-                                    onGenerateAnalysis: generateAIAnalysis,
-                                    onApplyTargets: applySuggestedTargets,
-                                    onSaveRoutine: saveRecommendedRoutine
-                                )
-                            }
-                        } else {
+                    if authManager.isPro {
+                        switch selectedSection {
+                        case .overview:
                             overviewSectionView
+                        case .aiAnalysis:
+                            EvolutionAICoachSection(
+                                analysis: aiAnalysis,
+                                isAnalyzing: isAnalyzingAI,
+                                errorMessage: aiErrorMessage,
+                                appliedTargetsSuccessfully: appliedTargetsSuccessfully,
+                                savedRoutineSuccessfully: savedRoutineSuccessfully,
+                                onGenerateAnalysis: generateAIAnalysis,
+                                onApplyTargets: applySuggestedTargets,
+                                onSaveRoutine: saveRecommendedRoutine
+                            )
                         }
+                    } else {
+                        overviewSectionView
                     }
-                    .padding(.top, 16)
-                    .padding(.bottom, 88)
                 }
-                .scrollIndicators(.hidden)
-                .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
+                .padding(.top, 10)
+                .padding(.bottom, 36)
             }
-            .navigationBarHidden(true)
+            .scrollIndicators(.hidden)
+            .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showLogWeight) {
                 LogWeightView()
                     .environment(\.modelContext, modelContext)
@@ -201,8 +182,8 @@ struct EvolutionView: View {
         }
     }
 
-    private var topHeaderBar: some View {
-        VStack(spacing: 12) {
+    private var evolutionHeaderSection: some View {
+        VStack(spacing: 14) {
             FormaScreenHeader(
                 title: authManager.isPro ? "Evolução & Análise" : "Evolução Corporal",
                 subtitle: authManager.isPro ? "Seu progresso e Inteligência Forma" : "Peso, calorias e consistência semanal"
@@ -217,15 +198,13 @@ struct EvolutionView: View {
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
                     .background(FormaTheme.Colors.brand)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
-            .padding(.top, 8)
 
             if authManager.isPro {
                 HStack(spacing: 4) {
@@ -243,21 +222,22 @@ struct EvolutionView: View {
                             }
                             .foregroundStyle(selectedSection == section ? .white : .secondary)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 9)
                             .background(selectedSection == section ? FormaTheme.Colors.brand : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(3)
-                .background(Color.primary.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                .padding(4)
+                .background(FormaTheme.Colors.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(0.06), lineWidth: 0.6)
+                )
             }
         }
-        .padding(.bottom, 12)
-        .background(FormaTheme.Colors.cardSurface)
     }
 
     private var overviewSectionView: some View {
@@ -564,16 +544,12 @@ struct EvolutionView: View {
                 try await FormaDataStore.shared.saveProfileRemoteFirst(p)
                 withAnimation(.spring(duration: 0.35)) {
                     appliedTargetsSuccessfully = true
-                    toastMessage = "Metas de \(Int(targets.dailyCalories)) kcal e macros aplicadas e salvas no banco!"
                 }
+                AuthManager.shared.showRealtimeToast("Metas de \(Int(targets.dailyCalories)) kcal e macros aplicadas!")
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
-                try? await Task.sleep(nanoseconds: 3_500_000_000)
-                withAnimation { toastMessage = nil }
             } catch {
-                withAnimation {
-                    toastMessage = "Erro ao sincronizar metas: \(FormaAPIClient.humanizeErrorMessage(error.localizedDescription))"
-                }
+                AuthManager.shared.showRealtimeToast("Erro ao sincronizar metas: \(FormaAPIClient.humanizeErrorMessage(error.localizedDescription))")
             }
         }
     }
@@ -596,16 +572,12 @@ struct EvolutionView: View {
                 try await FormaDataStore.shared.saveWorkoutRoutineRemoteFirst(newRoutine)
                 withAnimation(.spring(duration: 0.35)) {
                     savedRoutineSuccessfully = true
-                    toastMessage = "Ficha salva no banco e adicionada na aba de Treinos!"
                 }
+                AuthManager.shared.showRealtimeToast("Ficha salva na aba de Treinos!")
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
-                try? await Task.sleep(nanoseconds: 3_500_000_000)
-                withAnimation { toastMessage = nil }
             } catch {
-                withAnimation {
-                    toastMessage = "Erro ao sincronizar ficha: \(FormaAPIClient.humanizeErrorMessage(error.localizedDescription))"
-                }
+                AuthManager.shared.showRealtimeToast("Erro ao sincronizar ficha: \(FormaAPIClient.humanizeErrorMessage(error.localizedDescription))")
             }
         }
     }

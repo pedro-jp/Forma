@@ -69,7 +69,7 @@ public enum FoodDragTransferPayload: Sendable {
 }
 
 @Model
-final class FoodEntry {
+final class FoodEntry: Identifiable {
     var id: UUID = UUID()
     var name: String = ""
     var brand: String = ""

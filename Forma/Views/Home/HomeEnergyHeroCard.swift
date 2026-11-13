@@ -54,54 +54,85 @@ struct HomeEnergyHeroCard: View {
                     )
                 }
 
-                Picker("Foco", selection: $activeMetric) {
-                    Text("Consumidas").tag(FocusMetric.consumed)
-                    Text("Gastas").tag(FocusMetric.burned)
-                }
-                .pickerStyle(.segmented)
+                VStack(spacing: 10) {
+                    FormaDualEnergyRing(
+                        activeMetric: $activeMetric,
+                        consumed: caloriesConsumed,
+                        consumedTarget: adjustedCalorieTarget,
+                        burned: activeCaloriesBurned,
+                        burnedTarget: activeBurnTarget,
+                        isBulkingMode: goal == .gain
+                    )
 
-                HStack {
-                    if activeMetric == .consumed {
-                        FormaEnergyRing(
-                            current: caloriesConsumed,
-                            target: adjustedCalorieTarget,
-                            color: FormaTheme.Colors.brand,
-                            lineWidth: 13,
-                            unitLabel: "consumidas",
-                            isBulkingMode: goal == .gain
-                        )
-                        .frame(width: 174, height: 174)
-                    } else {
-                        FormaEnergyRing(
-                            current: activeCaloriesBurned,
-                            target: activeBurnTarget,
-                            color: FormaTheme.Colors.energyGreen,
-                            lineWidth: 13,
-                            unitLabel: "ativas",
-                            isBulkingMode: false
-                        )
-                        .frame(width: 174, height: 174)
+                    HStack(spacing: 16) {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                activeMetric = .consumed
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(FormaTheme.Colors.brand)
+                                    .frame(width: 7, height: 7)
+                                Text("Consumidas")
+                                    .font(.caption2.weight(activeMetric == .consumed ? .bold : .medium))
+                                    .foregroundStyle(activeMetric == .consumed ? FormaTheme.Colors.primaryText : .secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                activeMetric = .burned
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(FormaTheme.Colors.energyGreen)
+                                    .frame(width: 7, height: 7)
+                                Text("Queima Ativa")
+                                    .font(.caption2.weight(activeMetric == .burned ? .bold : .medium))
+                                    .foregroundStyle(activeMetric == .burned ? FormaTheme.Colors.primaryText : .secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
 
                 HStack(spacing: 10) {
-                    HomeBalanceMetricTile(
-                        title: "Consumidas",
-                        value: "\(Int(caloriesConsumed.rounded()))",
-                        subtitle: "meta \(Int(adjustedCalorieTarget.rounded()))",
-                        color: FormaTheme.Colors.brand,
-                        icon: "fork.knife"
-                    )
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            activeMetric = .consumed
+                        }
+                    } label: {
+                        HomeBalanceMetricTile(
+                            title: "Consumidas",
+                            value: "\(Int(caloriesConsumed.rounded()))",
+                            subtitle: "meta \(Int(adjustedCalorieTarget.rounded()))",
+                            color: FormaTheme.Colors.brand,
+                            icon: "fork.knife",
+                            isSelected: activeMetric == .consumed
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                    HomeBalanceMetricTile(
-                        title: "Ativas",
-                        value: "+\(Int(activeCaloriesBurned.rounded()))",
-                        subtitle: "treino + saúde",
-                        color: FormaTheme.Colors.energyGreen,
-                        icon: "flame.fill"
-                    )
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            activeMetric = .burned
+                        }
+                    } label: {
+                        HomeBalanceMetricTile(
+                            title: "Ativas",
+                            value: "+\(Int(activeCaloriesBurned.rounded()))",
+                            subtitle: "treino + saúde",
+                            color: FormaTheme.Colors.energyGreen,
+                            icon: "flame.fill",
+                            isSelected: activeMetric == .burned
+                        )
+                    }
+                    .buttonStyle(.plain)
 
                     HomeBalanceMetricTile(
                         title: remainingCalories >= 0 ? "Disponível" : "Excedente",
@@ -146,6 +177,7 @@ struct HomeBalanceMetricTile: View {
     let subtitle: String
     let color: Color
     let icon: String
+    var isSelected: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -178,11 +210,11 @@ struct HomeBalanceMetricTile: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous)
-                .fill(color.opacity(0.08))
+                .fill(color.opacity(isSelected ? 0.13 : 0.08))
         )
         .overlay(
             RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous)
-                .stroke(color.opacity(0.18), lineWidth: 0.8)
+                .stroke(color.opacity(isSelected ? 0.55 : 0.18), lineWidth: isSelected ? 1.4 : 0.8)
         )
     }
 }

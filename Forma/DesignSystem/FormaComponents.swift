@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Containers Padronizados
 
@@ -307,6 +310,181 @@ struct FormaEnergyRing: View {
                 Text("Meta atingida! ⚡️")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(FormaTheme.Colors.energyGreen)
+            }
+        }
+    }
+}
+
+// MARK: - Anel Duplo Concêntrico (Consumidas + Queima Ativa)
+
+struct FormaDualEnergyRing: View {
+    @Binding var activeMetric: FocusMetric
+    let consumed: Double
+    let consumedTarget: Double
+    let burned: Double
+    let burnedTarget: Double
+    var isBulkingMode: Bool = true
+
+    private var consumedProgress: Double {
+        guard consumedTarget > 0 else { return 0 }
+        return min(max(consumed / consumedTarget, 0), 1.0)
+    }
+
+    private var burnedProgress: Double {
+        guard burnedTarget > 0 else { return 0 }
+        return min(max(burned / burnedTarget, 0), 1.0)
+    }
+
+    private var consumedDiff: Double {
+        consumedTarget - consumed
+    }
+
+    var body: some View {
+        ZStack {
+            // Anel externo: Calorias consumidas
+            Circle()
+                .stroke(FormaTheme.Colors.brand.opacity(0.15), lineWidth: 14)
+                .frame(width: 186, height: 186)
+
+            Circle()
+                .trim(from: 0, to: consumedProgress)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            FormaTheme.Colors.brand.opacity(0.82),
+                            FormaTheme.Colors.brand,
+                            FormaTheme.Colors.brand.opacity(0.95)
+                        ],
+                        center: .center,
+                        startAngle: .degrees(-90),
+                        endAngle: .degrees(270)
+                    ),
+                    style: StrokeStyle(lineWidth: 14, lineCap: .round)
+                )
+                .frame(width: 186, height: 186)
+                .rotationEffect(.degrees(-90))
+                .opacity(activeMetric == .consumed ? 1.0 : 0.72)
+                .animation(.spring(duration: 0.45), value: consumedProgress)
+
+            // Anel interno: Queima ativa
+            Circle()
+                .stroke(FormaTheme.Colors.energyGreen.opacity(0.15), lineWidth: 11)
+                .frame(width: 148, height: 148)
+
+            Circle()
+                .trim(from: 0, to: burnedProgress)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            FormaTheme.Colors.energyGreen.opacity(0.82),
+                            FormaTheme.Colors.energyGreen,
+                            FormaTheme.Colors.energyGreen.opacity(0.95)
+                        ],
+                        center: .center,
+                        startAngle: .degrees(-90),
+                        endAngle: .degrees(270)
+                    ),
+                    style: StrokeStyle(lineWidth: 11, lineCap: .round)
+                )
+                .frame(width: 148, height: 148)
+                .rotationEffect(.degrees(-90))
+                .opacity(activeMetric == .burned ? 1.0 : 0.72)
+                .animation(.spring(duration: 0.45), value: burnedProgress)
+
+            VStack(spacing: 2) {
+                if activeMetric == .consumed {
+                    Text("\(Int(consumed.rounded()))")
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .contentTransition(.numericText())
+
+                    Text("de \(Int(consumedTarget.rounded())) kcal")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    consumedStatusTag
+                        .padding(.top, 1)
+                } else {
+                    Text("+\(Int(burned.rounded()))")
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .contentTransition(.numericText())
+
+                    Text("meta \(Int(burnedTarget.rounded())) kcal")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(burned >= burnedTarget ? "Queima batida! 🔥" : "Queima ativa")
+                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(FormaTheme.Colors.energyGreen)
+                        .lineLimit(1)
+                        .padding(.top, 1)
+                }
+
+                HStack(spacing: 4) {
+                    Capsule()
+                        .fill(FormaTheme.Colors.brand.opacity(activeMetric == .consumed ? 1.0 : 0.25))
+                        .frame(width: activeMetric == .consumed ? 12 : 5, height: 4)
+                    Capsule()
+                        .fill(FormaTheme.Colors.energyGreen.opacity(activeMetric == .burned ? 1.0 : 0.25))
+                        .frame(width: activeMetric == .burned ? 12 : 5, height: 4)
+                }
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: 116)
+        }
+        .frame(width: 196, height: 196)
+        .contentShape(Circle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                activeMetric = activeMetric == .consumed ? .burned : .consumed
+            }
+            #if canImport(UIKit)
+            UISelectionFeedbackGenerator().selectionChanged()
+            #endif
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Toque para alternar o foco entre calorias consumidas e queima ativa")
+    }
+
+    @ViewBuilder
+    private var consumedStatusTag: some View {
+        if isBulkingMode {
+            if consumedDiff > 0 {
+                Text("Faltam \(Int(consumedDiff.rounded())) kcal")
+                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(FormaTheme.Colors.brand)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text("Superávit batido! 🔥")
+                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        } else {
+            if consumedDiff > 0 {
+                Text("Restam \(Int(consumedDiff.rounded())) kcal")
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text("Meta atingida! ⚡️")
+                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
         }
     }

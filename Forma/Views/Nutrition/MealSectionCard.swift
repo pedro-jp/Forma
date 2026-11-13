@@ -130,7 +130,8 @@ struct MealSectionCard: View {
     let entries: [FoodEntry]
     let onAddTap: () -> Void
     var onCameraTap: (() -> Void)? = nil
-    let onDeleteEntry: (FoodEntry) -> Void
+    var onDeleteEntry: ((FoodEntry) -> Void)? = nil
+    var onEditEntry: ((FoodEntry) -> Void)? = nil
     var onDropPayloads: (([String]) -> Bool)? = nil
 
     @State private var isDropTargeted: Bool = false
@@ -221,8 +222,15 @@ struct MealSectionCard: View {
                                         .foregroundStyle(FormaTheme.Colors.primaryText)
                                         .lineLimit(1)
                                         .fixedSize(horizontal: true, vertical: false)
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
                                 }
                                 .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onEditEntry?(entry)
+                                }
                                 .draggable(FoodDragTransferPayload.encodeFood(entry.id)) {
                                     FoodDragPreviewCard(
                                         title: entry.name,
@@ -230,16 +238,6 @@ struct MealSectionCard: View {
                                         icon: mealType.icon
                                     )
                                 }
-
-                                Button {
-                                    onDeleteEntry(entry)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(FormaTheme.Colors.danger.opacity(0.65))
-                                        .padding(.leading, 6)
-                                }
-                                .buttonStyle(.plain)
                             }
                             .padding(.vertical, 3)
 

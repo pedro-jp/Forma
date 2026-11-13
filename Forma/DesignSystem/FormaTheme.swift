@@ -16,9 +16,10 @@ enum FormaTheme {
         static let primaryText = Color("FontNormal")
         static let pageBackground = Color(.systemGroupedBackground)
 
-        static let protein = Color("AccentGreen")
-        static let carbs = Color("AccentColor")
-        static let fat = Color.orange
+        static let protein = Color(red: 0.93, green: 0.36, blue: 0.42)
+        static let carbs = Color(red: 0.24, green: 0.56, blue: 0.96)
+        static let fat = Color(red: 0.96, green: 0.65, blue: 0.14)
+        static let bodyWeight = Color(red: 0.38, green: 0.47, blue: 0.96)
         static let water = Color.cyan
         static let aiAccent = Color(red: 0.62, green: 0.32, blue: 0.96)
         static let tacoCyan = Color(red: 0.20, green: 0.72, blue: 0.96)
