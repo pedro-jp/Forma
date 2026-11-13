@@ -272,6 +272,12 @@ public class FormaBackendApplication {
                 if ("28P01".equals(ex.getSQLState())
                     || msg.toLowerCase().contains("password authentication failed")
                     || msg.toLowerCase().contains("circuit breaker")) {
+                    if (shouldFailClosedOnPostgresError()) {
+                        throw new IllegalStateException(
+                            "Falha crítica de autenticação/conectividade PostgreSQL em modo fail-closed: " + msg,
+                            ex
+                        );
+                    }
                     log.error(
                         "[Supabase] Região encontrada ({}), mas SUPABASE_DB_PASSWORD foi recusada pelo PostgreSQL ({}). " +
                         "Confira a senha do banco em Supabase -> Project Settings -> Database. Usando H2 local temporariamente.",
@@ -283,12 +289,30 @@ public class FormaBackendApplication {
             }
         }
 
+        if (shouldFailClosedOnPostgresError()) {
+            throw new IllegalStateException(
+                "Banco PostgreSQL configurado indisponível no startup (fail-closed ativo): " + lastError
+            );
+        }
+
         log.error(
             "[Supabase] Não foi possível conectar ao PostgreSQL do Supabase (último erro: {}). " +
             "Usando H2 local temporariamente para manter o servidor e o /admin ativos.",
             lastError
         );
         return activateH2Fallback();
+    }
+
+    private static boolean shouldFailClosedOnPostgresError() {
+        String envVal = System.getenv("APP_ALLOW_H2_FALLBACK");
+        String propVal = System.getProperty("app.database.allow-h2-fallback");
+        String allowH2Fallback = (envVal != null && !envVal.isBlank()) ? envVal.trim()
+            : (propVal != null && !propVal.isBlank() ? propVal.trim() : null);
+        if ("false".equalsIgnoreCase(allowH2Fallback)) {
+            return true;
+        }
+        return "true".equalsIgnoreCase(System.getenv("RENDER"))
+            && !"true".equalsIgnoreCase(allowH2Fallback);
     }
 
     private static String normalizeJdbcUrl(String url) {

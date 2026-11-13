@@ -7,7 +7,9 @@ import com.forma.backend.security.AuthContextResolver;
 import com.forma.backend.service.AdminUserService;
 import com.forma.backend.service.AppConfigService;
 import com.forma.backend.service.JwtService;
+import com.forma.backend.service.MciAccessLogService;
 import com.forma.backend.websocket.AdminEventPublisherService;
+import com.forma.backend.websocket.UserAccountWebSocketHandler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,6 +43,10 @@ public class AdminController {
     private final JwtService jwtService;
     private final AuthContextResolver authContextResolver;
     private final AdminEventPublisherService adminEventPublisherService;
+    private final MciAccessLogService mciAccessLogService;
+    private final AdminAuditLogRepository adminAuditLogRepository;
+    private final SecurityIncidentLogRepository securityIncidentLogRepository;
+    private final UserAccountWebSocketHandler userAccountWebSocketHandler;
     private final String configuredAdminUsername;
     private final String configuredAdminPassword;
     private final String configuredAdminKey;
@@ -56,8 +62,12 @@ public class AdminController {
         JwtService jwtService,
         AuthContextResolver authContextResolver,
         AdminEventPublisherService adminEventPublisherService,
+        MciAccessLogService mciAccessLogService,
+        AdminAuditLogRepository adminAuditLogRepository,
+        SecurityIncidentLogRepository securityIncidentLogRepository,
+        UserAccountWebSocketHandler userAccountWebSocketHandler,
         @Value("${app.admin.username:admin}") String configuredAdminUsername,
-        @Value("${app.admin.password:admin123}") String configuredAdminPassword,
+        @Value("${app.admin.password:}") String configuredAdminPassword,
         @Value("${app.admin.key:}") String configuredAdminKey
     ) {
         this.userRepository = userRepository;
@@ -69,6 +79,10 @@ public class AdminController {
         this.jwtService = jwtService;
         this.authContextResolver = authContextResolver;
         this.adminEventPublisherService = adminEventPublisherService;
+        this.mciAccessLogService = mciAccessLogService;
+        this.adminAuditLogRepository = adminAuditLogRepository;
+        this.securityIncidentLogRepository = securityIncidentLogRepository;
+        this.userAccountWebSocketHandler = userAccountWebSocketHandler;
         this.configuredAdminUsername = configuredAdminUsername;
         this.configuredAdminPassword = configuredAdminPassword;
         this.configuredAdminKey = configuredAdminKey;
@@ -87,16 +101,21 @@ public class AdminController {
             throw new IllegalArgumentException("Informe usuário e senha.");
         }
 
-        boolean validUser = username.trim().equalsIgnoreCase(configuredAdminUsername.trim());
+        boolean validUser = authContextResolver.constantTimeSecretMatch(
+            configuredAdminUsername.trim().toLowerCase(),
+            username.trim().toLowerCase()
+        );
         boolean hasAdminKey = configuredAdminKey != null && !configuredAdminKey.trim().isEmpty();
         boolean hasAdminPassword = configuredAdminPassword != null && !configuredAdminPassword.trim().isEmpty();
-        boolean validPass = (hasAdminPassword && password.trim().equals(configuredAdminPassword.trim()))
-            || (hasAdminKey && password.trim().equals(configuredAdminKey.trim()));
+        boolean validPass = (hasAdminPassword && authContextResolver.constantTimeSecretMatch(configuredAdminPassword.trim(), password.trim()))
+            || (hasAdminKey && authContextResolver.constantTimeSecretMatch(configuredAdminKey.trim(), password.trim()));
 
         if (!validUser || !validPass) {
+            mciAccessLogService.recordAdminAudit(username.trim(), "ADMIN_LOGIN_FAILED", (String) null, "Tentativa de login admin recusada", request);
             throw new InvalidCredentialsException("Usuário ou senha de administrador inválidos.");
         }
 
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_LOGIN_SUCCESS", (String) null, "Sessão administrativa autenticada", request);
         String adminToken = jwtService.generateAdminToken(username.trim());
         ResponseCookie cookie = ResponseCookie.from(AuthContextResolver.ADMIN_COOKIE_NAME, adminToken)
             .httpOnly(true)
@@ -195,6 +214,7 @@ public class AdminController {
 
         appConfigService.setAiBlocked(newState);
         adminEventPublisherService.publishKillSwitchState(newState);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_KILLSWITCH", (String) null, "KillSwitch AI=" + newState, request);
 
         return ResponseEntity.ok(Map.of(
             "status", "success",
@@ -225,6 +245,7 @@ public class AdminController {
             appConfigService.getMaskedApiKey(),
             appConfigService.getGeminiModel()
         );
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_KEY_UPDATED", (String) null, "Modelo/chave Gemini atualizado (" + appConfigService.getGeminiModel() + ")", request);
 
         return ResponseEntity.ok(Map.of(
             "status", "updated",
@@ -256,13 +277,14 @@ public class AdminController {
             : appConfigService.getGeminiModel();
 
         try {
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + keyToTest;
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
             String pingBody = "{\"contents\":[{\"parts\":[{\"text\":\"ping\"}]}]}";
 
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
             HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
+                .header("x-goog-api-key", keyToTest)
                 .POST(HttpRequest.BodyPublishers.ofString(pingBody))
                 .timeout(Duration.ofSeconds(20))
                 .build();
@@ -300,10 +322,11 @@ public class AdminController {
 
         if (!apiKey.isBlank()) {
             try {
-                String url = "https://generativelanguage.googleapis.com/v1beta/models?key=" + apiKey;
+                String url = "https://generativelanguage.googleapis.com/v1beta/models";
                 HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(6)).build();
                 HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .header("x-goog-api-key", apiKey)
                     .GET()
                     .timeout(Duration.ofSeconds(6))
                     .build();
@@ -367,7 +390,7 @@ public class AdminController {
                 new AdminDto.GeminiModelItemDto(
                     "gemini-3.8-pro",
                     "Gemini 3.8 Pro (Raciocínio Profundo)",
-                    "Modelo avançado para diagnósticos fisiológicos complexos",
+                    "Modelo avançado para análises educacionais complexas de bem-estar",
                     "gemini-3.8-pro".equalsIgnoreCase(currentModel)
                 )
             );
@@ -394,7 +417,9 @@ public class AdminController {
         @RequestBody AdminDto.CreateUserRequest req
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
-        return ResponseEntity.ok(adminUserService.createUser(req));
+        AdminDto.UserSummaryDto created = adminUserService.createUser(req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_CREATE_USER", created.id(), "Criação manual de usuário", request);
+        return ResponseEntity.ok(created);
     }
 
     @GetMapping("/users/{userId}")
@@ -405,6 +430,7 @@ public class AdminController {
         @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_VIEW_USER", userId, "Acesso a detalhe do titular (LGPD Art. 37)", request);
         return ResponseEntity.ok(adminUserService.getUserDetail(userId));
     }
 
@@ -417,7 +443,9 @@ public class AdminController {
         @RequestBody AdminDto.UpdateUserRequest req
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
-        return ResponseEntity.ok(adminUserService.updateUser(userId, req));
+        AdminDto.UserSummaryDto updated = adminUserService.updateUser(userId, req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_UPDATE_USER", userId, "Atualização cadastral pelo admin", request);
+        return ResponseEntity.ok(updated);
     }
 
     @PostMapping("/users/{userId}/status")
@@ -429,7 +457,9 @@ public class AdminController {
         @RequestBody(required = false) AdminDto.UserStatusRequest req
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
-        return ResponseEntity.ok(adminUserService.updateStatus(userId, req));
+        AdminDto.UserSummaryDto updated = adminUserService.updateStatus(userId, req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_USER_STATUS", userId, "Status alterado para " + updated.status(), request);
+        return ResponseEntity.ok(updated);
     }
 
     @PostMapping("/users/{userId}/ai-access")
@@ -441,7 +471,9 @@ public class AdminController {
         @RequestBody AdminDto.UserAiAccessRequest req
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
-        return ResponseEntity.ok(adminUserService.updateAiAccess(userId, req));
+        AdminDto.UserSummaryDto updated = adminUserService.updateAiAccess(userId, req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_USER_AI_ACCESS", userId, "aiBlocked=" + updated.aiBlocked(), request);
+        return ResponseEntity.ok(updated);
     }
 
     @PostMapping("/users/{userId}/tier")
@@ -453,7 +485,9 @@ public class AdminController {
         @RequestBody(required = false) AdminDto.UserTierRequest req
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
-        return ResponseEntity.ok(adminUserService.updateAccountTier(userId, req));
+        AdminDto.UserSummaryDto updated = adminUserService.updateAccountTier(userId, req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_USER_TIER", userId, "Plano alterado para " + updated.accountTier(), request);
+        return ResponseEntity.ok(updated);
     }
 
     @PostMapping("/users/{userId}/reset")
@@ -466,6 +500,7 @@ public class AdminController {
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
         AdminDto.UserSummaryDto updated = adminUserService.resetUserAccount(userId, req);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_RESET_USER", userId, "Reset de dados do titular", request);
         return ResponseEntity.ok(Map.of(
             "status", "reset_completed",
             "user", updated,
@@ -483,10 +518,32 @@ public class AdminController {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
         adminUserService.deleteUserPermanently(userId);
         authContextResolver.markUserDeleted(userId);
+        userAccountWebSocketHandler.disconnectUser(userId);
+        mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_DELETE_USER", userId, "Exclusão permanente LGPD Art. 18", request);
         return ResponseEntity.ok(Map.of(
             "status", "deleted",
             "message", "Usuário e todos os dados vinculados foram excluídos permanentemente."
         ));
+    }
+
+    @GetMapping("/audit-logs")
+    public ResponseEntity<?> listAdminAuditLogs(
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        return ResponseEntity.ok(adminAuditLogRepository.findTop100ByOrderByCreatedAtUtcDesc());
+    }
+
+    @GetMapping("/incidents")
+    public ResponseEntity<?> listSecurityIncidents(
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        return ResponseEntity.ok(securityIncidentLogRepository.findTop50ByOrderByDetectedAtUtcDesc());
     }
 
     private boolean isDeprecatedOrUnsupportedModel(String id) {

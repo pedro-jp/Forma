@@ -25,15 +25,21 @@ public class AdminWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        activeSessions.add(session);
-        log.info("[WebSocket Admin] Nova conexão estabelecida: session={}", session.getId());
+        if (!Boolean.TRUE.equals(session.getAttributes().get(AdminWebSocketHandshakeInterceptor.ATTR_ADMIN_AUTHENTICATED))) {
+            try {
+                session.close(CloseStatus.POLICY_VIOLATION);
+            } catch (IOException ignored) {}
+            return;
+        }
 
-        // Envia mensagem de boas-vindas com status de conexão
+        activeSessions.add(session);
+        log.info("[WebSocket Admin] Nova conexão autenticada estabelecida: session={}", session.getId());
+
         try {
             String welcomePayload = objectMapper.writeValueAsString(Map.of(
                 "type", "CONNECTED",
                 "timestamp", Instant.now().toString(),
-                "message", "Conectado ao canal WebSocket de telemetria em tempo real do Forma",
+                "message", "Conectado ao canal WebSocket autenticado de telemetria do Forma",
                 "sessionId", session.getId()
             ));
             session.sendMessage(new TextMessage(welcomePayload));
@@ -60,7 +66,6 @@ public class AdminWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         String payload = message.getPayload();
-        // Responde a pings do cliente para manter o canal ativo
         if ("ping".equalsIgnoreCase(payload.trim())) {
             try {
                 session.sendMessage(new TextMessage("pong"));

@@ -1,6 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, LogOut, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Sparkles, LogOut, Wifi, WifiOff, RefreshCw, ShieldAlert, FileText } from 'lucide-react';
 import { AdminOverview, WebSocketEvent, AiLogSummary } from './types';
+
+interface AdminAuditLogItem {
+  id: string;
+  adminActor: string;
+  actionType: string;
+  targetRef?: string;
+  detailSummary?: string;
+  createdAtUtc: string;
+}
+
+interface SecurityIncidentItem {
+  id: string;
+  severity: string;
+  incidentType: string;
+  description: string;
+  anpdNotified: boolean;
+  detectedAtUtc: string;
+}
 import { LoginModal } from './components/LoginModal';
 import { KillSwitchCard } from './components/KillSwitchCard';
 import { StatsCards } from './components/StatsCards';
@@ -26,6 +44,8 @@ export const App: React.FC = () => {
     recentUsers: [],
     recentLogs: []
   });
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLogItem[]>([]);
+  const [incidents, setIncidents] = useState<SecurityIncidentItem[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,12 +96,25 @@ export const App: React.FC = () => {
 
   const loadOverview = async () => {
     try {
-      const resp = await fetch('/api/admin/overview', { credentials: 'include' });
+      const [resp, auditResp, incResp] = await Promise.all([
+        fetch('/api/admin/overview', { credentials: 'include' }),
+        fetch('/api/admin/audit-logs', { credentials: 'include' }),
+        fetch('/api/admin/incidents', { credentials: 'include' })
+      ]);
       if (resp.ok) {
         const data = await resp.json();
         setOverview(data);
       } else if (resp.status === 401) {
         setIsAuthenticated(false);
+        return;
+      }
+      if (auditResp.ok) {
+        const auditData = await auditResp.json();
+        if (Array.isArray(auditData)) setAuditLogs(auditData.slice(0, 12));
+      }
+      if (incResp.ok) {
+        const incData = await incResp.json();
+        if (Array.isArray(incData)) setIncidents(incData.slice(0, 8));
       }
     } catch (e) {
       console.warn('Erro ao carregar overview:', e);
@@ -321,7 +354,13 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: 600 }}>
+              <a href="/" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Portal</a>
+              <a href="/docs" style={{ color: '#34d399', textDecoration: 'none' }}>Docs</a>
+              <a href="/privacy" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>LGPD</a>
+              <a href="/terms" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Termos</a>
+            </div>
             {/* WebSocket Status Pill */}
             <div style={{
               display: 'flex',
@@ -404,6 +443,60 @@ export const App: React.FC = () => {
           users={overview.recentUsers}
           onRefresh={loadOverview}
         />
+
+        {/* LGPD Audit & Security Incidents */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: '20px',
+          marginTop: '24px'
+        }}>
+          <section className="glass-card" style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <FileText size={18} color="#34d399" />
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Auditoria Administrativa (LGPD Art. 37)</h3>
+            </div>
+            {auditLogs.length === 0 ? (
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sem eventos administrativos recentes.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
+                {auditLogs.map((item) => (
+                  <div key={item.id} style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                      <span>{item.actionType}</span>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{new Date(item.createdAtUtc).toLocaleString('pt-BR')}</span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      Ator: {item.adminActor}{item.detailSummary ? ` — ${item.detailSummary}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="glass-card" style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <ShieldAlert size={18} color="#fbbf24" />
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Incidentes de Segurança (ANPD Res. 15/2024)</h3>
+            </div>
+            {incidents.length === 0 ? (
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Nenhum incidente de segurança registrado.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
+                {incidents.map((inc) => (
+                  <div key={inc.id} style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                      <span>[{inc.severity}] {inc.incidentType}</span>
+                      <span style={{ color: inc.anpdNotified ? '#34d399' : '#fbbf24' }}>{inc.anpdNotified ? 'ANPD Notificada' : 'Em Triagem'}</span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>{inc.description}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

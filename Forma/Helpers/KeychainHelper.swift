@@ -34,12 +34,8 @@ public final class KeychainHelper {
         ]
         
         let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            // Fallback redundante para UserDefaults caso Keychain esteja restrito em ambiente simulado
-            UserDefaults.standard.set(data, forKey: "kc_fallback_\(key)")
-            return false
-        }
-        return true
+        UserDefaults.standard.removeObject(forKey: "kc_fallback_\(key)")
+        return status == errSecSuccess
     }
     
     public func loadString(key: String) -> String? {
@@ -63,8 +59,9 @@ public final class KeychainHelper {
             return data
         }
         
-        // Verifica se há fallback no UserDefaults
-        return UserDefaults.standard.data(forKey: "kc_fallback_\(key)")
+        // Nunca armazena nem lê tokens/segredos em UserDefaults por segurança (LGPD Art. 46)
+        UserDefaults.standard.removeObject(forKey: "kc_fallback_\(key)")
+        return nil
     }
     
     @discardableResult

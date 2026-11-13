@@ -51,7 +51,8 @@ public final class FormaAPIClient {
         jsonBody: [String: Any]? = nil,
         authenticated: Bool = true,
         timeout: TimeInterval = 14.0,
-        interceptAccountStatus: Bool = true
+        interceptAccountStatus: Bool = true,
+        overrideBearerToken: String? = nil
     ) async throws -> Data {
         let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
         let candidates = AuthManager.shared.candidateServerUrls
@@ -82,11 +83,10 @@ public final class FormaAPIClient {
             }
 
             if authenticated {
-                if let token = AuthManager.shared.jwtToken, !token.isEmpty {
+                if let explicitToken = overrideBearerToken, !explicitToken.isEmpty {
+                    request.setValue("Bearer \(explicitToken)", forHTTPHeaderField: "Authorization")
+                } else if let token = AuthManager.shared.jwtToken, !token.isEmpty {
                     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                }
-                if let userId = AuthManager.shared.currentUserId, !userId.isEmpty {
-                    request.setValue(userId, forHTTPHeaderField: "X-User-Id")
                 }
             }
 
@@ -139,6 +139,12 @@ public final class FormaAPIClient {
             if (json?["accountPaused"] as? Bool) == true {
                 return .accountPaused(cleanMessage)
             }
+            if (json?["aiConsentRequired"] as? Bool) == true {
+                Task { @MainActor in
+                    AIDataConsentManager.shared.setLocalCacheOnly(false)
+                }
+                return .aiBlocked(cleanMessage)
+            }
             if (json?["aiBlockedForUser"] as? Bool) == true {
                 return .aiBlocked(cleanMessage)
             }
@@ -186,12 +192,8 @@ public final class FormaAPIClient {
             return defaultMessage(for: statusCode)
         }
 
+        // Preserva transparência exigida pela LGPD Art. 9 e Art. 18 (não oculta o provedor de IA Google Gemini)
         return trimmed
-            .replacingOccurrences(of: "API do Gemini", with: "Inteligência Forma")
-            .replacingOccurrences(of: "IA Gemini", with: "Inteligência Forma")
-            .replacingOccurrences(of: "Gemini", with: "Inteligência Forma")
-            .replacingOccurrences(of: "Inteligência Artificial", with: "Inteligência Forma")
-            .replacingOccurrences(of: "com IA", with: "com a Inteligência Forma")
     }
 
     private static func defaultMessage(for statusCode: Int) -> String {

@@ -3,120 +3,253 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Política de Privacidade & Saúde (LGPD) — Forma</title>
+  <title>Política de Privacidade & Proteção de Dados (LGPD) — Forma</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0f14;
-      --card: #131922;
-      --border: rgba(255, 255, 255, 0.09);
+      --bg: #090d14;
+      --surface: #111824;
+      --surface-soft: #161f2e;
+      --border: rgba(255, 255, 255, 0.1);
       --text: #f3f6fa;
-      --muted: #a3b1c2;
+      --muted: #a6b4c8;
       --accent: #32d79b;
+      --accent-soft: rgba(50, 215, 155, 0.14);
+      --info: #60a5fa;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at top right, rgba(50, 215, 155, 0.08), transparent 42%), var(--bg);
       color: var(--text);
-      line-height: 1.65;
-      padding: 32px 18px 64px;
+      line-height: 1.68;
     }
-    .container { max-width: 780px; margin: 0 auto; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(9, 13, 20, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 800;
+      font-size: 16px;
+      text-decoration: none;
+    }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+    .nav a { color: var(--muted); text-decoration: none; }
+    .nav a:hover, .nav a.active { color: var(--accent); }
+    .container { max-width: 920px; margin: 0 auto; padding: 34px 20px 72px; }
     .badge {
       display: inline-block;
       padding: 5px 12px;
       border-radius: 999px;
-      background: rgba(50, 215, 155, 0.14);
+      background: var(--accent-soft);
       color: var(--accent);
       font-size: 12px;
       font-weight: 700;
       margin-bottom: 12px;
     }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
-    p, li { color: var(--muted); font-size: 15px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: -0.02em; }
+    h2 { margin: 0 0 12px; font-size: 18px; color: var(--accent); }
+    h3 { margin: 14px 0 6px; font-size: 15px; color: var(--text); }
+    p, li, td, th { color: var(--muted); font-size: 14.5px; }
     a { color: var(--accent); text-decoration: underline; }
     .card {
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 18px;
-      padding: 22px;
-      margin-top: 18px;
+      padding: 24px;
+      margin-top: 20px;
     }
     ul { padding-left: 20px; margin: 8px 0 0; }
+    li + li { margin-top: 6px; }
     strong { color: var(--text); }
-    .nav-links { margin-top: 8px; font-size: 14px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: var(--surface-soft);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 11px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--text);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: rgba(255, 255, 255, 0.04);
+    }
+    tr:last-child td { border-bottom: none; }
+    .highlight {
+      background: rgba(96, 165, 250, 0.08);
+      border: 1px solid rgba(96, 165, 250, 0.25);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 12px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+    }
+    @media (max-width: 680px) {
+      table, thead, tbody, th, td, tr { display: block; }
+      thead { display: none; }
+      td { border-bottom: 1px solid var(--border); }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <span class="badge">Forma • Nutrição, Hidratação & Treinos</span>
-    <h1>Política de Privacidade & Proteção de Dados (LGPD)</h1>
-    <p>Última atualização: Novembro de 2026 • <span class="nav-links"><a href="/terms.html">Ler Termos de Uso (EULA)</a></span></p>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <img src="/logo.png" alt="Logo Forma" onerror="this.style.display='none'" />
+        <span>Forma</span>
+      </a>
+      <nav class="nav" aria-label="Navegação Principal">
+        <a href="/">Início</a>
+        <a href="/docs">Documentação</a>
+        <a href="/privacy" class="active">Privacidade & LGPD</a>
+        <a href="/terms">Termos de Uso</a>
+        <a href="/admin/">Console Admin</a>
+      </nav>
+    </div>
+  </header>
 
-    <div class="card">
-      <h2>1. Controlador e Escopo (Lei nº 13.709/2018 — LGPD)</h2>
-      <p>Esta Política descreve como o aplicativo <strong>Forma</strong> realiza o tratamento de dados pessoais e dados pessoais sensíveis relacionados a bem-estar, nutrição e atividade física, em conformidade com a <strong>Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018 — LGPD)</strong> e com as Diretrizes da Apple App Store.</p>
+  <main class="container">
+    <span class="badge">Versão 2026.11-LGPD • Atualizada em Novembro de 2026</span>
+    <h1>Política de Privacidade & Proteção de Dados</h1>
+    <p>Documento oficial de transparência do ecossistema <strong>Forma</strong> (Aplicativo iOS/watchOS, Widgets e API Cloud) em conformidade com a <strong>Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018 — LGPD)</strong>, o <strong>Marco Civil da Internet (Lei nº 12.965/2014)</strong>, resoluções da <strong>ANPD</strong> e diretrizes da Apple App Store.</p>
+
+    <section class="card">
+      <h2>1. Controlador, Público Elegível e Encarregado (DPO)</h2>
       <ul>
-        <li><strong>Aplicativo / Controlador:</strong> Forma App (Desenvolvimento e Operação: João Pedro).</li>
-        <li><strong>Canal do Encarregado de Dados (DPO) e Suporte de Privacidade:</strong> <a href="mailto:joaopedroc035@gmail.com">joaopedroc035@gmail.com</a>.</li>
+        <li><strong>Controlador:</strong> Forma App — Tecnologia e Bem-Estar Digital.</li>
+        <li><strong>Encarregado pelo Tratamento de Dados Pessoais (DPO — Art. 41 LGPD):</strong> Canal dedicado em <a href="mailto:privacidade@forma.app">privacidade@forma.app</a> (suporte adicional em <a href="mailto:joaopedroc035@gmail.com">joaopedroc035@gmail.com</a>).</li>
+        <li><strong>Restrição etária (Art. 14 LGPD):</strong> O Forma destina-se exclusivamente a pessoas com <strong>18 anos ou mais</strong>. Contas sem confirmação etária no cadastro são recusadas automaticamente pela API.</li>
+        <li><strong>Auditoria de versão:</strong> Esta política possui hash criptográfico SHA-256 vinculado ao livro-razão imutável de consentimentos (<code>legal_consent_ledger</code>) do usuário.</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>2. Dados Coletados e Bases Legais (Arts. 7º e 11 da LGPD)</h2>
-      <p>Coletamos estritamente o mínimo necessário para executar as funcionalidades solicitadas por você:</p>
+    <section class="card">
+      <h2>2. Matriz de Dados Tratados, Finalidades e Bases Legais</h2>
+      <p>Aplicamos estritamente o princípio da minimização (LGPD Art. 6º, III) — zero rastreamento publicitário (ATT desativado) e zero comercialização de dados:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Categoria de Dados</th>
+            <th>Dados Específicos</th>
+            <th>Finalidade Exclusiva</th>
+            <th>Base Legal (LGPD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Conta & Autenticação</strong></td>
+            <td>Nome de exibição, e-mail, hash BCrypt, sub Apple/Google, tokens OAuth (cifrados AES-256-GCM)</td>
+            <td>Autenticação, controle de sessão (JWT revogável via <code>tokenVersion</code>) e recuperação OTP</td>
+            <td>Execução de contrato (Art. 7º, V)</td>
+          </tr>
+          <tr>
+            <td><strong>Dados Sensíveis de Saúde & Biometria</strong></td>
+            <td>Peso atual/alvo, altura, sexo fisiológico, objetivo, refeições, fotos de pratos, água, treinos, passos Apple Saúde</td>
+            <td>Cálculos nutricionais/energéticos (TMB, TACO, METs), gráficos de evolução e sincronização multi-dispositivo</td>
+            <td>Consentimento específico e destacado (Art. 11, I)</td>
+          </tr>
+          <tr>
+            <td><strong>IA Generativa na Nuvem (Opt-In)</strong></td>
+            <td>Descrições de pratos/treinos, imagem sem metadados EXIF, medidas numéricas e resumo recente (sem nome real, e-mail ou senha)</td>
+            <td>Extração estruturada por IA (Google Gemini) quando explicitamente autorizada pelo titular Pro</td>
+            <td>Consentimento específico separado e revogável (Art. 11, I e Art. 8º, §5º)</td>
+          </tr>
+          <tr>
+            <td><strong>Registros de Conexão (Marco Civil)</strong></td>
+            <td>IP (cifrado AES-256-GCM), porta lógica de origem, data/hora UTC e referência HMAC-SHA256 do evento de acesso</td>
+            <td>Cumprimento estrito de guarda legal contra fraudes e incidentes (sem histórico de refeições ou navegação)</td>
+            <td>Cumprimento de obrigação legal (Art. 7º, II c/c Lei 12.965/2014 Art. 15)</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>3. Inteligência Artificial Opt-In (Google Gemini — Google LLC)</h2>
+      <p>Os recursos com IA em nuvem do Forma utilizam a API empresarial paga do <strong>Google Gemini (Google LLC)</strong> e obedecem a salvaguardas rigorosas:</p>
       <ul>
-        <li><strong>Dados cadastrais (execução de contrato — Art. 7º, V):</strong> nome de exibição, endereço de e-mail, hash criptográfico de senha (BCrypt) e identificador de autenticação social (Entrar com a Apple ou Google).</li>
-        <li><strong>Dados corporais e de bem-estar (consentimento específico — Art. 11, I):</strong> peso, altura, objetivo corporal, registros de refeições (incluindo fotos ou descrições em áudio/texto enviadas voluntariamente), ingestão de água, treinos e fichas.</li>
-        <li><strong>Zero rastreamento publicitário:</strong> o Forma <strong>nunca</strong> vende dados a terceiros, não utiliza corretores de dados (data brokers) e não realiza rastreamento entre aplicativos (ATT).</li>
+        <li><strong>Nenhum envio sem aceite explícito:</strong> A troca de plano para Forma Pro ou o login nunca ativa o envio à IA silenciosamente. Sem consentimento registrado no servidor, o backend bloqueia chamadas ao Gemini com HTTP <code>403</code> (<code>aiConsentRequired</code>).</li>
+        <li><strong>Minimização e limpeza de EXIF no dispositivo:</strong> Antes do envio, fotos são recodificadas localmente para remover metadados EXIF/GPS da câmera, e o payload substitui o nome completo por identificador genérico (<code>"Usuário"</code>). E-mail, senha e tokens jamais são enviados.</li>
+        <li><strong>Sem treinamento de modelos públicos:</strong> O tráfego ocorre exclusivamente pelo proxy backend com TLS 1.3 via API paga (sem uso para treinamento de modelos generativos públicos).</li>
+        <li><strong>Revogação imediata:</strong> Você pode revogar ou reativar esse consentimento a qualquer momento em <strong>Perfil &gt; Privacidade, Saúde &amp; Termos</strong>, preservando acesso total à Tabela TACO offline e cálculos determinísticos locais.</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>3. Uso da Inteligência Artificial do Google Gemini (Google LLC)</h2>
-      <p>O Forma utiliza a tecnologia de inteligência artificial <strong>Google Gemini (fornecida pela Google LLC)</strong> para recursos opcionais em nuvem — incluindo identificação de refeições por foto ou texto, estimativa de gasto energético em treinos, sugestão inicial de metas e análises de evolução.</p>
+    <section class="card">
+      <h2>4. Integração com Apple Saúde (HealthKit)</h2>
+      <p>Mediante permissão nativa no iOS, o Forma lê passos, calorias ativas, distância e sessões de treino do <strong>Apple Saúde</strong> e grava treinos finalizados no app. Dados do HealthKit nunca são usados para publicidade, corretagem de dados ou perfilamento comportamental comercial e podem ser revogados a qualquer momento em <strong>Ajustes do iPhone &gt; Saúde</strong>.</p>
+    </section>
+
+    <section class="card">
+      <h2>5. Suboperadores e Transferência Internacional (LGPD Art. 33)</h2>
+      <p>Utilizamos operadores globais com contratos de segurança, isolamento lógico e criptografia:</p>
       <ul>
-        <li><strong>Consentimento prévio e explícito:</strong> nenhum dado pessoal ou de saúde é transmitido à IA do Google Gemini antes que você conceda autorização explícita no aplicativo.</li>
-        <li><strong>Quais dados são enviados sob demanda:</strong> fotos ou descrições de pratos/alimentos, descrições de treinos, nome de exibição, peso, altura, objetivo corporal e resumo recente de alimentação, água, pesagens e treinos.</li>
-        <li><strong>Dados que nunca são enviados à IA:</strong> seu e-mail, senha e tokens de login Apple/Google jamais são compartilhados com o Google Gemini.</li>
-        <li><strong>Revogação imediata:</strong> você pode desativar o envio para a IA do Google Gemini a qualquer momento em <strong>Perfil &gt; Privacidade, Saúde &amp; Termos de Uso</strong>, mantendo o aplicativo funcional com cálculos locais e a Tabela TACO offline.</li>
+        <li><strong>Supabase Inc.:</strong> Banco PostgreSQL com políticas de Row-Level Security (RLS) ativadas nas tabelas de usuário e auditoria.</li>
+        <li><strong>Render Services Inc.:</strong> Hospedagem de aplicação API com TLS 1.3, cabeçalhos OWASP (HSTS, CSP, X-Frame-Options) e limitação de taxa.</li>
+        <li><strong>Google LLC (Gemini API):</strong> Inferência transitória sob demanda apenas quando autorizada pelo titular.</li>
+        <li><strong>Resend Inc.:</strong> Envio exclusivo de códigos OTP efêmeros de recuperação de senha.</li>
+        <li><strong>Apple Inc.:</strong> Autenticação federada Sign in with Apple e ecossistema HealthKit local no iOS/watchOS.</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>4. Integração com o Apple Saúde (HealthKit)</h2>
-      <p>Mediante sua autorização explícita no iOS, o Forma lê passos, calorias ativas, distância e treinos do <strong>Apple Saúde</strong> e grava treinos concluídos no app.</p>
+    <section class="card">
+      <h2>6. Segurança Técnica e Retenção de Dados (Art. 46 LGPD &amp; Art. 15 MCI)</h2>
       <ul>
-        <li>Os dados lidos do HealthKit jamais são usados para publicidade, marketing ou mineração de dados, nem compartilhados com terceiros sem o seu consentimento explícito.</li>
-        <li>Você pode gerenciar ou revogar o acesso a qualquer momento em <strong>Ajustes do iPhone &gt; Saúde &gt; Acesso aos Dados e Dispositivos &gt; Forma</strong>.</li>
+        <li><strong>Criptografia em trânsito e em repouso:</strong> TLS 1.2+/1.3 obrigatório em produção (cleartext HTTP bloqueado em builds Release); tokens JWT (com revogação instantânea via <code>tokenVersion</code>) guardados no Apple Keychain (<code>AfterFirstUnlockThisDeviceOnly</code>); arquivos locais protegidos por <code>completeFileProtectionUnlessOpen</code>; tokens OAuth, IPs de acesso e segredos de API cifrados no banco com <strong>AES-256-GCM</strong> (<code>ENC:v1:</code>); senhas com <strong>BCrypt</strong> e validação mínima de 8 caracteres.</li>
+        <li><strong>WebSockets seguros:</strong> Conexões em tempo real autenticam exclusivamente via cabeçalho <code>Authorization: Bearer</code> ou cookie <code>HttpOnly; Secure; SameSite=Lax</code>, sem exposição de tokens em URLs.</li>
+        <li><strong>Guarda legal do Marco Civil (180 dias):</strong> Logs de conexão (<code>mci_access_logs</code>) são retidos pelo prazo legal de <strong>180 dias</strong> e removidos por rotina automática diária.</li>
+        <li><strong>Exclusão definitiva e Tombstone:</strong> Ao acionar <strong>Excluir Minha Conta</strong> (<code>DELETE /api/auth/account</code>), seus dados pessoais e registros de saúde são apagados imediatamente, tokens Apple/Google são revogados junto aos emissores, a trilha de consentimentos é pseudonimizada (<code>anon:&lt;HMAC&gt;</code>) e um identificador de bloqueio (tombstone) impede ressurreição indevida por tokens antigos.</li>
       </ul>
-    </div>
+      <div class="highlight">
+        <strong>Plano de Resposta a Incidentes (Resolução CD/ANPD nº 15/2024):</strong> Incidentes relevantes são registrados em trilha imutável (<code>security_incident_logs</code>) com análise de risco imediata e comunicação à <strong>ANPD</strong> e aos titulares afetados em até <strong>3 (três) dias úteis</strong>.
+      </div>
+    </section>
 
-    <div class="card">
-      <h2>5. Segurança e Transferência Internacional (Arts. 33 e 46 da LGPD)</h2>
-      <p>Seus dados são transmitidos exclusivamente via conexões criptografadas (HTTPS/TLS 1.2+), com senhas protegidas por hash adaptativo <strong>BCrypt</strong>. Para prover sincronização em nuvem e processamento sob demanda, utilizamos provedores internacionais com padrões reconhecidos de segurança da informação: <strong>Supabase Inc.</strong> (banco de dados PostgreSQL), <strong>Render Services Inc.</strong> (hospedagem da API) e <strong>Google LLC</strong> (API Google Gemini, apenas quando autorizada).</p>
-    </div>
-
-    <div class="card">
-      <h2>6. Fontes Científicas & Aviso de Saúde (Diretriz Apple 1.4.1)</h2>
-      <p>Os cálculos fisiológicos e estimativas nutricionais apresentados no Forma possuem caráter estritamente informativo e educacional, baseados na literatura científica pública:</p>
+    <section class="card">
+      <h2>7. Direitos do Titular, Portabilidade e ANPD (LGPD Art. 18)</h2>
+      <p>Nos termos do Art. 18 da LGPD, você tem direito a confirmação, acesso, correção, anonimização, revogação de consentimento, eliminação e <strong>portabilidade completa em formato JSON estruturado</strong>:</p>
       <ul>
-        <li><strong>Taxa Metabólica Basal (Mifflin-St Jeor):</strong> Mifflin MD et al., <em>Am J Clin Nutr</em>, 1990 — <a href="https://pubmed.ncbi.nlm.nih.gov/2305711/" target="_blank" rel="noopener">PubMed PMID 2305711</a>.</li>
-        <li><strong>Composição Nutricional de Alimentos:</strong> Tabela Brasileira de Composição de Alimentos (TACO — NEPA/UNICAMP) — <a href="https://www.cfn.org.br/wp-content/uploads/2017/03/taco_4_edicao_ampliada_e_revisada.pdf" target="_blank" rel="noopener">Documento Oficial TACO 4ª Edição</a>.</li>
-        <li><strong>Classificação de IMC &amp; Atividade Física:</strong> Organização Mundial da Saúde (OMS / WHO) — <a href="https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight" target="_blank" rel="noopener">WHO BMI Guidelines</a> e <a href="https://www.who.int/news-room/fact-sheets/detail/physical-activity" target="_blank" rel="noopener">WHO Physical Activity</a>.</li>
-        <li><strong>Equivalentes Metabólicos de Exercícios (METs):</strong> Ainsworth BE et al., <em>Compendium of Physical Activities</em> — <a href="https://pacompendium.com/" target="_blank" rel="noopener">pacompendium.com</a>.</li>
-        <li><strong>Macronutrientes e Proteínas em Exercício:</strong> Jäger R et al., <em>ISSN Position Stand: Protein and Exercise</em> — <a href="https://pubmed.ncbi.nlm.nih.gov/28642676/" target="_blank" rel="noopener">PubMed PMID 28642676</a>.</li>
+        <li><strong>Exportação instantânea no iOS ou API:</strong> Toque em <strong>Perfil &gt; Privacidade, Saúde &amp; Termos &gt; Exportar Meus Dados (JSON — LGPD Art. 18)</strong> ou consulte o endpoint autenticado <code>GET /api/privacy/export</code>.</li>
+        <li><strong>Exclusão imediata:</strong> Disponível em <strong>Perfil &gt; Conta &gt; Excluir Minha Conta</strong>.</li>
+        <li><strong>Petição perante a ANPD (Art. 18, §1º):</strong> Caso entenda que alguma solicitação não foi atendida adequadamente após contato com nosso DPO (<a href="mailto:privacidade@forma.app">privacidade@forma.app</a>), você poderá peticionar diretamente à Autoridade Nacional de Proteção de Dados (ANPD).</li>
       </ul>
-      <p><strong>Aviso Importante:</strong> o Forma não realiza diagnóstico médico, clínico ou prescrição dietética individualizada, não substituindo a avaliação de médico, nutricionista ou profissional de educação física.</p>
-    </div>
-
-    <div class="card">
-      <h2>7. Direitos do Titular e Exclusão Permanente de Conta (Art. 18 da LGPD)</h2>
-      <p>Você pode acessar, corrigir, atualizar ou eliminar definitivamente todos os seus dados diretamente pelo aplicativo em <strong>Perfil &gt; Conta &gt; Excluir Minha Conta</strong>. Ao confirmar a exclusão, seu cadastro, perfil, refeições, água, pesagens, treinos, análises de IA e vínculos de login (incluindo a revogação imediata dos tokens de acesso do <em>Sign in with Apple</em> e do <em>Google Sign-In</em>) são removidos imediatamente.</p>
-    </div>
-  </div>
+    </section>
+  </main>
 </body>
 </html>

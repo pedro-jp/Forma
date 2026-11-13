@@ -13,12 +13,16 @@ import java.text.Normalizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
+import javax.imageio.ImageIO;
 
 @Service
 public class GeminiAiProxyService {
@@ -34,6 +38,7 @@ public class GeminiAiProxyService {
     private final AppConfigService appConfigService;
     private final AiRequestLogRepository aiRequestLogRepository;
     private final AdminEventPublisherService adminEventPublisherService;
+    private final PhysiologicalSafetyGuard physiologicalSafetyGuard;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -41,12 +46,14 @@ public class GeminiAiProxyService {
     public GeminiAiProxyService(
         AppConfigService appConfigService,
         AiRequestLogRepository aiRequestLogRepository,
-        AdminEventPublisherService adminEventPublisherService
+        AdminEventPublisherService adminEventPublisherService,
+        PhysiologicalSafetyGuard physiologicalSafetyGuard
     ) {
         this(
             appConfigService,
             aiRequestLogRepository,
             adminEventPublisherService,
+            physiologicalSafetyGuard,
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
         );
     }
@@ -57,9 +64,28 @@ public class GeminiAiProxyService {
         AdminEventPublisherService adminEventPublisherService,
         HttpClient httpClient
     ) {
+        this(
+            appConfigService,
+            aiRequestLogRepository,
+            adminEventPublisherService,
+            new PhysiologicalSafetyGuard(),
+            httpClient
+        );
+    }
+
+    public GeminiAiProxyService(
+        AppConfigService appConfigService,
+        AiRequestLogRepository aiRequestLogRepository,
+        AdminEventPublisherService adminEventPublisherService,
+        PhysiologicalSafetyGuard physiologicalSafetyGuard,
+        HttpClient httpClient
+    ) {
         this.appConfigService = appConfigService;
         this.aiRequestLogRepository = aiRequestLogRepository;
         this.adminEventPublisherService = adminEventPublisherService;
+        this.physiologicalSafetyGuard = physiologicalSafetyGuard != null
+            ? physiologicalSafetyGuard
+            : new PhysiologicalSafetyGuard();
         this.httpClient = httpClient;
         this.objectMapper = new ObjectMapper();
     }
@@ -69,7 +95,6 @@ public class GeminiAiProxyService {
             throw new IllegalArgumentException("Dados da refeição não informados.");
         }
         long startTime = System.currentTimeMillis();
-        String userName = sanitizeUserName(request.userName());
         boolean hasImage = request.imageBase64() != null && !request.imageBase64().isBlank();
         String userDescription = request.description() != null ? request.description().trim() : "";
 
@@ -78,8 +103,8 @@ public class GeminiAiProxyService {
         }
 
         String prompt = hasImage
-            ? buildMealImagePrompt(userName, userDescription)
-            : buildMealTextPrompt(userName, userDescription);
+            ? buildMealImagePrompt(userDescription)
+            : buildMealTextPrompt(userDescription);
 
         String logSummary = hasImage
             ? "[FOTO] " + (userDescription.isEmpty() ? "Análise visual de refeição" : userDescription)
@@ -102,21 +127,22 @@ public class GeminiAiProxyService {
             throw new IllegalArgumentException("Informe a descrição do treino para análise.");
         }
         long startTime = System.currentTimeMillis();
-        String userName = sanitizeUserName(request.userName());
         double weight = (request.userWeight() != null && request.userWeight() > 0) ? request.userWeight() : 72.0;
-        String prompt = buildWorkoutPrompt(userName, weight, request.description().trim());
+        String description = request.description().trim();
+        String prompt = buildWorkoutPrompt(weight, description);
 
         String raw = executeAndLog(
             userId,
             "/api/ai/analyze-workout",
-            request.description().trim(),
+            description,
             startTime,
             prompt,
             null,
             null,
             "Não foi possível gerar ou calcular o treino agora. Tente novamente em instantes."
         );
-        return ensureExerciseVideoIds(raw);
+        String withVideos = ensureExerciseVideoIds(raw);
+        return physiologicalSafetyGuard.sanitizeWorkoutJson(withVideos, description);
     }
 
     public String analyzeEvolution(UUID userId, AiDto.EvolutionAiRequest request) {
@@ -124,20 +150,24 @@ public class GeminiAiProxyService {
             throw new IllegalArgumentException("Dados de evolução não informados.");
         }
         long startTime = System.currentTimeMillis();
-        String userName = sanitizeUserName(request.userName());
-        String prompt = buildEvolutionPrompt(userName, request);
+        String prompt = buildEvolutionPrompt(request);
+        double weight = request.currentWeight() != null && request.currentWeight() > 30.0 ? request.currentWeight() : 72.0;
+        double heightM = request.heightMeters() != null && request.heightMeters() >= 1.0 ? request.heightMeters() : 1.78;
+        String safetyContext = (request.userGoal() != null ? request.userGoal() + " " : "")
+            + (request.activityLogJson() != null ? request.activityLogJson() : "");
 
         String raw = executeAndLog(
             userId,
             "/api/ai/analyze-evolution",
-            "Evolução " + userName,
+            "Panorama de evolução física",
             startTime,
             prompt,
             null,
             null,
             "A análise inteligente de evolução está temporariamente ocupada. Tente atualizar em alguns segundos."
         );
-        return ensureExerciseVideoIds(raw);
+        String withVideos = ensureExerciseVideoIds(raw);
+        return physiologicalSafetyGuard.sanitizeEvolutionJson(withVideos, safetyContext, weight, heightM);
     }
 
     public String suggestInitialGoals(UUID userId, AiDto.InitialGoalsAiRequest request) {
@@ -150,7 +180,6 @@ public class GeminiAiProxyService {
             throw new IllegalArgumentException("Informe peso atual e altura válidos para sugerir as metas.");
         }
         long startTime = System.currentTimeMillis();
-        String userName = sanitizeUserName(request.userName());
         String goal = (request.goal() != null && !request.goal().isBlank()) ? request.goal().trim() : "Ganhar peso";
         double weight = request.currentWeight();
         double heightM = request.heightMeters() > 3.0 ? request.heightMeters() / 100.0 : request.heightMeters();
@@ -158,37 +187,37 @@ public class GeminiAiProxyService {
             ? request.activityLevel().trim()
             : "Moderado (3-4x/semana)";
 
-        Map<String, Object> baseline = computePhysiologicalInitialTargets(userName, goal, weight, heightM, request.targetWeight(), activity);
+        Map<String, Object> baseline = computePhysiologicalInitialTargets(goal, weight, heightM, request.targetWeight(), activity);
 
         if (allowCloudAi) {
             try {
                 if (!appConfigService.isAiBlocked()) {
-                    String prompt = buildInitialGoalsPrompt(userName, goal, weight, heightM, request.targetWeight(), activity, baseline);
+                    String prompt = buildInitialGoalsPrompt(goal, weight, heightM, request.targetWeight(), activity, baseline);
                     String result = callGeminiWithFailover(prompt, null, null);
                     if (result != null && !result.isBlank()) {
                         JsonNode node = objectMapper.readTree(result);
-                        if (node.has("daily_calories") && node.path("daily_calories").asDouble(0) >= 1000) {
+                        if (node.has("daily_calories") && node.path("daily_calories").asDouble(0) >= 800) {
                             long duration = System.currentTimeMillis() - startTime;
-                            logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding " + userName + " (" + goal + ")", "SUCCESS", duration);
-                            return result;
+                            logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding (" + goal + ")", "SUCCESS", duration);
+                            return physiologicalSafetyGuard.sanitizeInitialGoalsJson(result, weight, heightM);
                         }
                     }
                 }
             } catch (Exception e) {
                 long duration = System.currentTimeMillis() - startTime;
-                logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding fallback (" + e.getMessage() + ")", "FALLBACK_LOCAL", duration);
+                logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding fallback", "FALLBACK_LOCAL", duration);
             }
         }
 
         try {
-            return objectMapper.writeValueAsString(baseline);
+            String baselineJson = objectMapper.writeValueAsString(baseline);
+            return physiologicalSafetyGuard.sanitizeInitialGoalsJson(baselineJson, weight, heightM);
         } catch (Exception e) {
             throw new RuntimeException("Falha ao calcular sugestão inicial de metas.");
         }
     }
 
     private Map<String, Object> computePhysiologicalInitialTargets(
-        String userName,
         String goal,
         double weight,
         double heightM,
@@ -265,8 +294,8 @@ public class GeminiAiProxyService {
 
         String explanation = String.format(
             Locale.forLanguageTag("pt-BR"),
-            "%s, calculamos sua Taxa Basal (~%.0f kcal) e gasto diário (~%.0f kcal) para %.1f kg e %.2f m, aplicando %s rumo aos %.1f kg.",
-            userName, tmb, tdee, weight, heightM, strategyLabel, suggestedTargetWeight
+            "Calculamos uma estimativa educacional com Taxa Basal (~%.0f kcal) e gasto diário (~%.0f kcal) para %.1f kg e %.2f m, aplicando %s rumo aos %.1f kg.",
+            tmb, tdee, weight, heightM, strategyLabel, suggestedTargetWeight
         );
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -283,7 +312,6 @@ public class GeminiAiProxyService {
     }
 
     private static String buildInitialGoalsPrompt(
-        String userName,
         String goal,
         double weight,
         double heightM,
@@ -296,24 +324,24 @@ public class GeminiAiProxyService {
             : String.format(Locale.US, "não informado (sugira um peso-alvo saudável e realista próximo de %s kg)", baseline.get("suggested_target_weight"));
 
         return """
-        Você é o nutricionista esportivo e fisiologista chefe da Inteligência Forma.
-        O(A) usuário(a) %s acabou de criar sua conta no app Forma e está preenchendo a configuração inicial obrigatória.
+        Você é o assistente educacional de bem-estar, nutrição e condicionamento físico do aplicativo Forma.
+        Caráter estritamente informativo e educacional: NÃO emita diagnósticos médicos, NÃO prescreva dietas clínicas ou tratamentos e NÃO mencione dados pessoais nominativos.
+        O usuário está preenchendo a configuração inicial de metas no app Forma.
         
-        DADOS BIOMÉTRICOS DO ATLETA:
-        - Nome: %s
+        DADOS BIOMÉTRICOS ANONIMIZADOS:
         - Objetivo principal: %s
         - Peso atual: %.1f kg
         - Altura: %.2f m
         - Peso meta: %s
         - Nível de atividade física: %s
         
-        REFERÊNCIA FISIOLÓGICA BASE (Mifflin-St Jeor + nível de atividade):
+        REFERÊNCIA ESTIMADA BASE (Mifflin-St Jeor + nível de atividade):
         - Calorias sugeridas base: %s kcal/dia
         - Proteínas base: %s g | Carboidratos base: %s g | Gorduras base: %s g
         - Água diária base: %s ml | Queima ativa em treino: %s kcal | Passos: %s
         
-        Calcule metas diárias personalizadas, realistas e coerentes (a soma 4*proteína + 4*carboidratos + 9*gorduras deve bater com daily_calories).
-        Escreva em `explanation` uma mensagem acolhedora e objetiva (máximo 2 frases curtas em português) dirigida a %s explicando a estratégia adotada pela Inteligência Forma.
+        Calcule estimativas diárias educativas, seguras (mínimo 1200 kcal/dia) e coerentes (4*proteína + 4*carboidratos + 9*gorduras compatível com daily_calories).
+        Escreva em `explanation` uma mensagem acolhedora e objetiva (máximo 2 frases curtas em português) explicando a estimativa educacional adotada pelo Forma.
         
         Responda ESTRITAMENTE em JSON válido com estas chaves exatas:
         {
@@ -325,11 +353,9 @@ public class GeminiAiProxyService {
           "water_milliliters": 2800,
           "target_calorie_burn": 500.0,
           "target_steps": 8500.0,
-          "explanation": "Explicação curta e motivadora em até 2 frases."
+          "explanation": "Explicação educacional curta e motivadora em até 2 frases."
         }
         """.formatted(
-            userName,
-            userName,
             goal,
             weight,
             heightM,
@@ -341,8 +367,7 @@ public class GeminiAiProxyService {
             baseline.get("fat_grams"),
             baseline.get("water_milliliters"),
             baseline.get("target_calorie_burn"),
-            baseline.get("target_steps"),
-            userName
+            baseline.get("target_steps")
         );
     }
 
@@ -390,10 +415,11 @@ public class GeminiAiProxyService {
 
         for (String model : modelsToTry) {
             try {
-                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
+                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
                 HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
+                    .header("x-goog-api-key", apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .timeout(Duration.ofSeconds(25))
                     .build();
@@ -424,14 +450,15 @@ public class GeminiAiProxyService {
     private String buildGeminiPayload(String prompt, String imageBase64, String imageMimeType) throws Exception {
         List<Object> parts = new ArrayList<>();
         if (imageBase64 != null && !imageBase64.isBlank()) {
-            String cleanBase64 = stripDataUriPrefix(imageBase64.trim());
+            String rawCleanBase64 = stripDataUriPrefix(imageBase64.trim());
             String mimeType = (imageMimeType != null && !imageMimeType.isBlank())
                 ? imageMimeType.trim()
                 : "image/jpeg";
+            String sanitizedBase64 = stripExifMetadataIfRealImage(rawCleanBase64, mimeType);
             parts.add(Map.of(
                 "inlineData", Map.of(
                     "mimeType", mimeType,
-                    "data", cleanBase64
+                    "data", sanitizedBase64
                 )
             ));
         }
@@ -444,6 +471,30 @@ public class GeminiAiProxyService {
                 "temperature", 0.2
             )
         ));
+    }
+
+    private static String stripExifMetadataIfRealImage(String cleanBase64, String mimeType) {
+        try {
+            byte[] decoded = Base64.getDecoder().decode(cleanBase64);
+            if (decoded.length <= 128) {
+                return cleanBase64;
+            }
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(decoded));
+            if (image == null) {
+                return cleanBase64;
+            }
+            String format = (mimeType != null && mimeType.toLowerCase(Locale.ROOT).contains("png")) ? "png" : "jpg";
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            if ("jpg".equals(format) && image.getColorModel().hasAlpha()) {
+                BufferedImage rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+                rgb.getGraphics().drawImage(image, 0, 0, null);
+                image = rgb;
+            }
+            ImageIO.write(image, format, baos);
+            return Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception ignored) {
+            return cleanBase64;
+        }
     }
 
     private String extractResponseText(String rawBody) throws Exception {
@@ -482,14 +533,14 @@ public class GeminiAiProxyService {
         return (raw != null && !raw.isBlank()) ? raw.trim() : "Usuário";
     }
 
-    private static String buildMealImagePrompt(String userName, String userDescription) {
+    private static String buildMealImagePrompt(String userDescription) {
         String extraNote = userDescription.isEmpty()
             ? "Nenhuma observação escrita adicional; baseie-se integralmente na análise visual da imagem."
             : "Observação adicional do usuário para complementar a imagem: \"" + userDescription + "\"";
 
         return """
-        Você é o motor de visão computacional e nutrição esportiva de alta precisão do app Forma.
-        Nome do usuário: %s. Personalize o resumo direcionando-se a %s.
+        Você é o assistente educacional de visão computacional e estimativa nutricional de bem-estar do app Forma.
+        Caráter estritamente informativo (não substitui acompanhamento de nutricionista CRN ou médico).
         Analise cuidadosamente a FOTO enviada da refeição, prato, bebida, embalagem ou tabela nutricional.
         %s
         
@@ -500,7 +551,7 @@ public class GeminiAiProxyService {
            - Se a foto mostrar uma embalagem ou rótulo/tabela nutricional, leia o nome exato do produto, o peso/porção indicada e os macronutrientes reais do rótulo.
            - Se o usuário informou alguma quantidade ou detalhe na observação adicional, respeite essa informação.
         3. UNIDADES (ML VS G): Para líquidos/bebidas/sopas líquidas, use "unit": "ml" e "is_liquid": true. Para alimentos sólidos ou em pó, use "unit": "g" e "is_liquid": false.
-        4. CÁLCULO NUTRICIONAL REALISTA: Calcule calories, protein, carbohydrates e fat exatos para o portion_value estimado de cada item (baseando-se na Tabela TACO / USDA) e some tudo em total_calories, total_protein, total_carbs e total_fat.
+        4. CÁLCULO NUTRICIONAL REALISTA: Calcule calories, protein, carbohydrates e fat estimados para o portion_value de cada item (baseando-se na Tabela TACO / USDA) e some tudo em total_calories, total_protein, total_carbs e total_fat.
         
         Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
         {
@@ -523,13 +574,12 @@ public class GeminiAiProxyService {
           "total_fat": 5.4,
           "ai_summary": "Breve resumo visual em 1 frase explicando os itens e porções estimadas na foto"
         }
-        """.formatted(userName, userName, extraNote);
+        """.formatted(extraNote);
     }
 
-    private static String buildMealTextPrompt(String userName, String userDescription) {
+    private static String buildMealTextPrompt(String userDescription) {
         return """
-        Você é o motor de inteligência artificial nutricional de alta precisão do app Forma.
-        Nome do usuário: %s. Personalize os resumos e orientações direcionando-se nominalmente a %s.
+        Você é o assistente educacional de registro nutricional e bem-estar do app Forma (caráter estritamente informativo).
         Analise a descrição informada pelo usuário (pode conter um ou múltiplos alimentos, pratos compostos, shakes ou porções coloquiais brasileiras como 'colher de sopa', 'concha', 'copo grande', 'pratão', 'dose', etc.).
         
         Descrição do usuário: "%s"
@@ -568,7 +618,7 @@ public class GeminiAiProxyService {
           "total_fat": 0.3,
           "ai_summary": "Breve resumo nutricional objetivo em 1 frase"
         }
-        """.formatted(userName, userName, userDescription);
+        """.formatted(userDescription);
     }
 
     private static final String CANONICAL_VIDEO_IDS_GUIDE = """
@@ -740,19 +790,19 @@ public class GeminiAiProxyService {
         return "agachamento_livre";
     }
 
-    private static String buildWorkoutPrompt(String userName, double weight, String description) {
+    private static String buildWorkoutPrompt(double weight, String description) {
         return """
-        Você é o treinador, fisiologista do exercício e especialista em hipertrofia do aplicativo Forma.
-        Nome do atleta/usuário: %s. Dirija-se a %s nos feedbacks.
+        Você é o assistente educacional de organização de treinos e condicionamento físico do aplicativo Forma.
+        Caráter estritamente informativo: NÃO prescreva cargas máximas em kg nem substitua orientação presencial de profissional de Educação Física (CREF).
         O usuário descreveu seu treino físico ou os exercícios realizados/planejados.
-        Peso corporal do usuário: %.1fkg.
+        Peso corporal anonimizado: %.1fkg.
         
         Descrição informada pelo usuário: "%s"
         
         DIRETRIZES TÉCNICAS:
-        1. GASTO CALÓRICO (MET): Estime com precisão a queima calórica e duração baseando-se no peso corporal de %.1fkg.
-        2. ANÁLISE DE HIPERTROFIA: Informe target_muscles, hypertrophy_focus, recommended_rest_seconds e ai_feedback.
-        3. VÍDEO DE EXECUÇÃO OBRIGATÓRIO: Estruture cada exercício com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds e SEMPRE preencha "animation_id" (NUNCA retorne null) usando o ID exato do catálogo oficial de vídeos 3D abaixo.
+        1. GASTO CALÓRICO (MET): Estime a queima calórica aproximada e duração baseando-se no peso corporal de %.1fkg.
+        2. ANÁLISE EDUCATIVA: Informe target_muscles, hypertrophy_focus, recommended_rest_seconds e ai_feedback informativo.
+        3. VÍDEO DE EXECUÇÃO OBRIGATÓRIO: Estruture cada exercício com name, sets, reps, suggested_weight ("Esforço moderado (ajuste presencial com CREF)"), target_muscle, execution_tip, rest_seconds e SEMPRE preencha "animation_id" (NUNCA retorne null) usando o ID exato do catálogo oficial de vídeos 3D abaixo.
         
         %s
         
@@ -766,24 +816,24 @@ public class GeminiAiProxyService {
           "target_muscles": "Músculos principais",
           "hypertrophy_focus": "Foco do estímulo",
           "recommended_rest_seconds": 90,
-          "ai_feedback": "Feedback fisiológico objetivo",
+          "ai_feedback": "Feedback educativo objetivo",
           "exercises": [
             {
               "name": "Supino Inclinado com Halteres",
               "sets": 4,
               "reps": "8-10",
-              "suggested_weight": "22kg cada",
+              "suggested_weight": "Esforço moderado (ajuste presencial com CREF)",
               "target_muscle": "Peitoral Superior",
-              "execution_tip": "Desça controlando o alongamento e una suavemente no topo.",
+              "execution_tip": "Desça controlando o alongamento e mantenha postura estável.",
               "rest_seconds": 90,
               "animation_id": "supino_inclinado_halteres"
             }
           ]
         }
-        """.formatted(userName, userName, weight, description, weight, CANONICAL_VIDEO_IDS_GUIDE);
+        """.formatted(weight, description, weight, CANONICAL_VIDEO_IDS_GUIDE);
     }
 
-    private static String buildEvolutionPrompt(String userName, AiDto.EvolutionAiRequest request) {
+    private static String buildEvolutionPrompt(AiDto.EvolutionAiRequest request) {
         String goal = request.userGoal() != null ? request.userGoal() : "Ganhar peso";
         double weight = request.currentWeight() != null && request.currentWeight() > 30.0 ? request.currentWeight() : 72.0;
         double targetWeight = request.targetWeight() != null && request.targetWeight() > 30.0 ? request.targetWeight() : 80.0;
@@ -806,12 +856,11 @@ public class GeminiAiProxyService {
         double currentTargetCal = request.targetCalories() != null ? request.targetCalories() : suggestedBase;
 
         return """
-        Você é o assistente educacional de bem-estar, nutrição esportiva e treinamento do aplicativo Forma (operado via Google Gemini).
-        Você está orientando nominalmente o(a) atleta %s. Personalize cada análise, sugestão e plano de ação direcionando-se a %s (utilize sempre o nome do aplicativo Forma e mantenha linguagem informativa e educacional, sem emitir diagnósticos clínicos/médicos ou prescrever medicamentos).
-        Analise o contexto fisiológico completo e o arquivo REAL de log de atividades dos últimos dias. Seja direto, técnico e conciso (2 a 3 frases objetivas por análise, exatamente 3 itens práticos nas listas de sugestões e 4 a 5 exercícios principais na ficha de treino) para máxima velocidade de resposta.
+        Você é o assistente educacional de bem-estar, organização nutricional e condicionamento físico do aplicativo Forma (operado via Google Gemini).
+        Mantenha linguagem estritamente informativa e educacional (NÃO emita diagnósticos clínicos/médicos, NÃO prescreva dietas terapêuticas, medicamentos ou cargas em kg e NÃO utilize dados pessoais nominativos).
+        Analise o contexto fisiológico anonimizado e o arquivo de log de atividades dos últimos dias. Seja direto, técnico e conciso (2 a 3 frases objetivas por análise, exatamente 3 itens práticos nas listas de sugestões e 4 a 5 exercícios principais na ficha sugerida).
         
-        CONTEXTO FISIOLÓGICO COMPLETO DO ATLETA (MOTOR FORMA):
-        - Atleta: %s
+        CONTEXTO FISIOLÓGICO ANONIMIZADO (MOTOR FORMA):
         - Objetivo Principal: %s
         - Peso Atual: %.1f kg | Peso Alvo: %.1f kg | Altura: %.2f m
         - Taxa Metabólica Basal (TMB): %.0f kcal/dia
@@ -820,16 +869,15 @@ public class GeminiAiProxyService {
         - Meta Contextual Calculada pelo App: %.0f kcal/dia (Meta salva atual no perfil: %.0f kcal/dia)
         
         DIRETRIZ DE CONSISTÊNCIA DE METAS (OBRIGATÓRIA):
-        Ancore `suggested_targets` (`daily_calories`, `protein_grams`, `carbs_grams`, `fat_grams`, `water_milliliters`) exatamente nesse contexto fisiológico completo (TDEE Contextual de %.0f kcal e Meta Contextual Base de %.0f kcal), fazendo apenas ajustes finos (+/- 0 a 100 kcal) se os dados reais do ARQUIVO DE LOG BRUTO mostrarem estagnação ou necessidade específica. Explique claramente o cálculo na chave `explanation`.
+        Ancore `suggested_targets` (`daily_calories` nunca abaixo de 1200 kcal, `protein_grams`, `carbs_grams`, `fat_grams`, `water_milliliters`) nesse contexto fisiológico (TDEE Contextual de %.0f kcal e Meta Contextual Base de %.0f kcal), explicando claramente na chave `explanation`.
         
-        ARQUIVO DE LOG BRUTO:
+        ARQUIVO DE LOG BRUTO ANONIMIZADO:
         %s
         
         %s
         
-        Retorne ESTRITAMENTE um JSON válido com status_summary, calorie_diagnostic, macro_diagnostic, hydration_diagnostic, workout_suggestions (array de 3 strings), nutrition_suggestions (array de 3 strings), weekly_action_plan, suggested_targets (daily_calories, protein_grams, carbs_grams, fat_grams, water_milliliters, explanation) e recommended_routine (title, workout_type, target_muscles, hypertrophy_focus, estimated_duration_minutes, estimated_calories, recommended_rest_seconds, exercises com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds e animation_id OBRIGATORIAMENTE preenchido com um ID válido do catálogo acima, nunca null).
+        Retorne ESTRITAMENTE um JSON válido com status_summary, calorie_diagnostic, macro_diagnostic, hydration_diagnostic, workout_suggestions (array de 3 strings), nutrition_suggestions (array de 3 strings), weekly_action_plan, suggested_targets (daily_calories, protein_grams, carbs_grams, fat_grams, water_milliliters, explanation) e recommended_routine (title, workout_type, target_muscles, hypertrophy_focus, estimated_duration_minutes, estimated_calories, recommended_rest_seconds, exercises com name, sets, reps, suggested_weight sempre como 'Esforço moderado (ajuste presencial com CREF)', target_muscle, execution_tip, rest_seconds e animation_id OBRIGATORIAMENTE preenchido com um ID válido do catálogo acima, nunca null).
         """.formatted(
-            userName, userName, userName,
             goal,
             weight, targetWeight, heightM,
             tmb,

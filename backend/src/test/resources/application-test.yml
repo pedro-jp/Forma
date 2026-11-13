@@ -23,3 +23,11 @@ app:
     key: test_admin_key
   google:
     client-id: test-google-client-id.apps.googleusercontent.com
+  apple:
+    bundle-id: com.joaovitor.Forma
+  auth:
+    allow-dev-social-mock: true
+  security:
+    encryption-key: FormaTestEncryptionKey2026SuperSecure32Bytes!
+    rate-limit:
+      enabled: false

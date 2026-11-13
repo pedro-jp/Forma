@@ -216,15 +216,28 @@ public final class WidgetDataManager: Sendable {
             shared.synchronize()
         }
         
-        // 2. Grava no arquivo JSON do Container compartilhado (redundância segura)
+        // 2. Grava no arquivo JSON do Container compartilhado (redundância segura e protegida em repouso)
         if let fileURL = sharedFileURL {
-            try? encoded.write(to: fileURL, options: .atomic)
+            try? encoded.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
         }
         
         // 3. Fallback no sandbox local
         UserDefaults.standard.set(encoded, forKey: Self.storageKey)
         
         // 4. Notifica o WidgetKit para recarregar imediatamente todas as timelines
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    public func clearAllUserData() {
+        if let shared = sharedDefaults {
+            shared.removeObject(forKey: Self.storageKey)
+            shared.removeObject(forKey: Self.pendingWaterKey)
+            shared.synchronize()
+        }
+        if let fileURL = sharedFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        UserDefaults.standard.removeObject(forKey: Self.storageKey)
         WidgetCenter.shared.reloadAllTimelines()
     }
     

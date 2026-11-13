@@ -126,17 +126,16 @@ struct VoiceAddFoodView: View {
                 let defaultMeal = preselectedMeal ?? AIFoodParserService.shared.inferPrimaryMealType()
                 voiceService.updateMealType(defaultMeal)
                 if authManager.isPro {
-                    if !aiConsent.hasGrantedConsent {
-                        aiConsent.setConsent(true)
-                    }
                     if initialOpenCamera {
                         voiceService.stopListening(shouldAnalyze: false)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            if authManager.isPro {
-                                showCameraSheet = true
+                        runWithAIConsent {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                if authManager.isPro {
+                                    showCameraSheet = true
+                                }
                             }
                         }
-                    } else {
+                    } else if aiConsent.hasGrantedConsent {
                         startVoiceFlow()
                     }
                 } else {
@@ -633,20 +632,21 @@ struct VoiceAddFoodView: View {
     private func handleAccountTierChange(_ newTier: AccountTier) {
         textDebounceTask?.cancel()
         if newTier == .pro {
-            if !aiConsent.hasGrantedConsent {
-                aiConsent.setConsent(true)
-            }
             showAIConsentSheet = false
             pendingAIConsentAction = nil
             voiceService.errorMessage = nil
 
             let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let imgData = selectedImageData {
-                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+            if aiConsent.hasGrantedConsent {
+                if let imgData = selectedImageData {
+                    voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+                } else if !trimmed.isEmpty {
+                    voiceService.analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
+                } else if !showCameraSheet && !isFieldFocused {
+                    startVoiceFlow()
+                }
             } else if !trimmed.isEmpty {
-                voiceService.analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
-            } else if !showCameraSheet && !isFieldFocused {
-                startVoiceFlow()
+                voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: false)
             }
         } else {
             isFieldFocused = false
@@ -667,8 +667,10 @@ struct VoiceAddFoodView: View {
 
     private func runWithAIConsent(_ action: @escaping () -> Void) {
         guard authManager.isPro else { return }
-        if !aiConsent.hasGrantedConsent {
-            aiConsent.setConsent(true)
+        guard aiConsent.hasGrantedConsent else {
+            pendingAIConsentAction = action
+            showAIConsentSheet = true
+            return
         }
         action()
     }
@@ -686,18 +688,16 @@ struct VoiceAddFoodView: View {
             return
         }
 
-        if !aiConsent.hasGrantedConsent {
-            aiConsent.setConsent(true)
-        }
-
-        if let imgData = selectedImageData {
-            voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
-        } else {
-            let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let fallback = voiceService.currentIntent?.rawText ?? ""
-            let query = !trimmed.isEmpty ? trimmed : fallback
-            guard !query.isEmpty else { return }
-            voiceService.analyzeIntent(from: query, forceAI: true, allowCloudAI: true)
+        runWithAIConsent {
+            if let imgData = selectedImageData {
+                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+            } else {
+                let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let fallback = voiceService.currentIntent?.rawText ?? ""
+                let query = !trimmed.isEmpty ? trimmed : fallback
+                guard !query.isEmpty else { return }
+                voiceService.analyzeIntent(from: query, forceAI: true, allowCloudAI: true)
+            }
         }
     }
 
@@ -717,10 +717,9 @@ struct VoiceAddFoodView: View {
 
         selectedImage = image
         selectedImageData = compressed
-        if !aiConsent.hasGrantedConsent {
-            aiConsent.setConsent(true)
+        runWithAIConsent {
+            voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
         }
-        voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
     }
 
     private func clearSelectedPhoto() {
@@ -754,10 +753,10 @@ struct VoiceAddFoodView: View {
 
         guard !voiceService.isRecording else { return }
 
-        if authManager.isPro {
+        if authManager.isPro && aiConsent.hasGrantedConsent {
             textDebounceTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 850_000_000)
-                guard !Task.isCancelled, authManager.isPro, !voiceService.isRecording else { return }
+                guard !Task.isCancelled, authManager.isPro, aiConsent.hasGrantedConsent, !voiceService.isRecording else { return }
                 guard !voiceService.isIncompleteFragment(trimmed),
                       !voiceService.hasDanglingConnectorOrNumber(trimmed) else { return }
                 voiceService.analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
@@ -765,7 +764,7 @@ struct VoiceAddFoodView: View {
         } else {
             textDebounceTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled, !authManager.isPro else { return }
+                guard !Task.isCancelled else { return }
                 voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: false)
             }
         }
@@ -773,10 +772,12 @@ struct VoiceAddFoodView: View {
 
     private func startVoiceFlow() {
         guard authManager.isPro else { return }
-        Task {
-            let authorized = await voiceService.requestPermissions()
-            if authorized && authManager.isPro && selectedImage == nil && !showCameraSheet {
-                voiceService.startListening()
+        runWithAIConsent {
+            Task {
+                let authorized = await voiceService.requestPermissions()
+                if authorized && authManager.isPro && aiConsent.hasGrantedConsent && selectedImage == nil && !showCameraSheet {
+                    voiceService.startListening()
+                }
             }
         }
     }
@@ -790,11 +791,15 @@ struct VoiceAddFoodView: View {
         if voiceService.isRecording {
             voiceService.stopListening(shouldAnalyze: selectedImageData == nil)
             if let imgData = selectedImageData {
-                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+                runWithAIConsent {
+                    voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+                }
             }
         } else {
             isFieldFocused = false
-            voiceService.startListening()
+            runWithAIConsent {
+                voiceService.startListening()
+            }
         }
     }
 

@@ -252,7 +252,7 @@ struct ProfileView: View {
 
                 Text(
                     authManager.isPro
-                        ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e diagnóstico completo de evolução."
+                        ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e análise educacional de evolução via Google Gemini (sem caráter diagnóstico)."
                         : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. O tipo da conta é definido pelo painel administrativo."
                 )
                 .font(.caption)

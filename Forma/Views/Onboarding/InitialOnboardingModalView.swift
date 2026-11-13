@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct InitialOnboardingModalView: View {
     @ObservedObject private var authManager = AuthManager.shared
@@ -39,6 +40,7 @@ struct InitialOnboardingModalView: View {
 
     // Identificação & Objetivo
     @State private var nameText: String = ""
+    @State private var selectedSex: BiologicalSex = BiologicalSex.currentStored
     @State private var selectedGoal: FitnessGoal = .gain
     @State private var selectedActivity: ActivityLevelOption = .moderate
 
@@ -86,7 +88,7 @@ struct InitialOnboardingModalView: View {
     }
 
     private var validCalories: Double? {
-        parseBoundedDouble(dailyCaloriesText, min: 1000, max: 6000)
+        parseBoundedDouble(dailyCaloriesText, min: 1200, max: 6000)
     }
 
     private var validProtein: Double? {
@@ -187,6 +189,10 @@ struct InitialOnboardingModalView: View {
             .onChange(of: heightText) { _, _ in scheduleAutoAISuggestion() }
             .onChange(of: selectedGoal) { _, _ in
                 hasManuallyEditedTargetWeight = false
+                scheduleAutoAISuggestion(immediate: true)
+            }
+            .onChange(of: selectedSex) { _, newSex in
+                BiologicalSex.persistToDefaults(newSex)
                 scheduleAutoAISuggestion(immediate: true)
             }
             .onChange(of: selectedActivity) { _, _ in
@@ -347,6 +353,36 @@ struct InitialOnboardingModalView: View {
     private var biometricsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionTitle("2. Medidas Corporais", icon: "scalemass.fill")
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Sexo Biológico (Exemplos de Treino e TMB)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(BiologicalSex.allCases) { sex in
+                        let isSelected = selectedSex == sex
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                selectedSex = sex
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: sex.icon)
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text(sex.rawValue)
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(isSelected ? .white : FormaTheme.Colors.primaryText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(isSelected ? FormaTheme.Colors.brand : Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
 
             HStack(spacing: 12) {
                 onboardingNumberField(
@@ -721,11 +757,12 @@ struct InitialOnboardingModalView: View {
         guard let weight = validCurrentWeight, let height = validHeight else { return }
 
         let signature = String(
-            format: "%.1f|%.2f|%@|%@",
+            format: "%.1f|%.2f|%@|%@|%@",
             weight,
             height,
             selectedGoal.rawValue,
-            selectedActivity.rawValue
+            selectedActivity.rawValue,
+            selectedSex.rawValue
         )
         guard signature != lastAISignature else { return }
 
@@ -742,11 +779,12 @@ struct InitialOnboardingModalView: View {
         aiDebounceTask?.cancel()
         guard let weight = validCurrentWeight, let height = validHeight else { return }
         let signature = String(
-            format: "%.1f|%.2f|%@|%@",
+            format: "%.1f|%.2f|%@|%@|%@",
             weight,
             height,
             selectedGoal.rawValue,
-            selectedActivity.rawValue
+            selectedActivity.rawValue,
+            selectedSex.rawValue
         )
         Task { @MainActor in
             await requestAISuggestion(weight: weight, height: height, signature: signature, forceTargetWeightRefresh: forceTargetWeightRefresh)
@@ -822,6 +860,10 @@ struct InitialOnboardingModalView: View {
                     targetCalorieBurn: burn,
                     targetSteps: steps
                 )
+                BiologicalSex.persistToDefaults(selectedSex)
+                let savedProfile = FormaDataStore.shared.ensureSingleProfile(in: FormaDataStore.shared.mainContext)
+                savedProfile.biologicalSex = selectedSex
+                try? FormaDataStore.shared.mainContext.save()
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
                 isSavingToDatabase = false

@@ -8,6 +8,9 @@
 import Foundation
 import Combine
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Modelos de Dados Estruturados da IA
 
@@ -506,9 +509,6 @@ public final class GeminiAIService: ObservableObject {
 
     public func activateAllForProTier() {
         lastErrorMessage = nil
-        if !AIDataConsentManager.isConsentGranted {
-            AIDataConsentManager.shared.setConsent(true)
-        }
     }
 
     public func cancelAndCutAllForFreeTier() {
@@ -568,13 +568,12 @@ public final class GeminiAIService: ObservableObject {
         
         try await checkAndRecordRateLimit()
         
-        let userName = currentUserName
-        
+        // Minimização de dados pessoais (LGPD Art. 6º III): não envia o nome real do titular à IA em nuvem
         let responseJson = try await sendBackendAiRequest(
             path: "analyze-meal",
             body: [
                 "description": trimmed,
-                "userName": userName
+                "userName": "Usuário"
             ]
         )
         
@@ -603,16 +602,27 @@ public final class GeminiAIService: ObservableObject {
         
         try await checkAndRecordRateLimit()
         
-        let base64String = imageData.base64EncodedString()
+        var sanitizedData = imageData
+        var sanitizedMime = mimeType
+        #if canImport(UIKit)
+        // Remove metadados EXIF/GPS da imagem no próprio dispositivo antes do envio à IA em nuvem
+        if let image = UIImage(data: imageData),
+           let strippedJpeg = image.jpegData(compressionQuality: 0.82) {
+            sanitizedData = strippedJpeg
+            sanitizedMime = "image/jpeg"
+        }
+        #endif
+
+        let base64String = sanitizedData.base64EncodedString()
         let trimmedNote = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
         
         let responseJson = try await sendBackendAiRequest(
             path: "analyze-meal",
             body: [
                 "description": trimmedNote,
-                "userName": currentUserName,
+                "userName": "Usuário",
                 "imageBase64": base64String,
-                "imageMimeType": mimeType
+                "imageMimeType": sanitizedMime
             ]
         )
         
@@ -643,14 +653,13 @@ public final class GeminiAIService: ObservableObject {
         
         try await checkAndRecordRateLimit()
         
-        let userName = currentUserName
-        
+        // Minimização de dados pessoais (LGPD Art. 6º III): não envia o nome real do titular à IA em nuvem
         let responseJson = try await sendBackendAiRequest(
             path: "analyze-workout",
             body: [
                 "description": trimmed,
                 "userWeight": userWeight,
-                "userName": userName
+                "userName": "Usuário"
             ]
         )
         
@@ -717,7 +726,7 @@ public final class GeminiAIService: ObservableObject {
                 "suggestedWaterMl": contextualMetrics.waterMilliliters,
                 "avgDailyWorkoutBurn": recalcContext.avgDailyWorkoutBurn,
                 "activityLogJson": activityLogJson,
-                "userName": currentUserName
+                "userName": "Usuário"
             ]
         )
         guard let data = responseJson.data(using: .utf8) else {
@@ -747,7 +756,7 @@ public final class GeminiAIService: ObservableObject {
     ) async -> InitialGoalsAISuggestion {
         let safeName = userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Atleta" : userName.trimmingCharacters(in: .whitespacesAndNewlines)
         var body: [String: Any] = [
-            "userName": safeName,
+            "userName": "Usuário",
             "goal": goal.rawValue,
             "currentWeight": currentWeight,
             "heightMeters": heightMeters,
@@ -757,10 +766,7 @@ public final class GeminiAIService: ObservableObject {
             body["targetWeight"] = targetWeight
         }
 
-        if AuthManager.shared.isPro {
-            if !AIDataConsentManager.isConsentGranted {
-                AIDataConsentManager.shared.setConsent(true)
-            }
+        if AuthManager.shared.isPro && AIDataConsentManager.isConsentGranted {
             do {
                 let responseJson = try await sendBackendAiRequest(
                     path: "suggest-initial-goals",
@@ -768,7 +774,7 @@ public final class GeminiAIService: ObservableObject {
                 )
                 if let data = responseJson.data(using: .utf8),
                    let decoded = try? JSONDecoder().decode(InitialGoalsAISuggestion.self, from: data),
-                   decoded.dailyCalories >= 1000 {
+                   decoded.dailyCalories >= 1200 {
                     return decoded
                 }
             } catch {
@@ -776,18 +782,20 @@ public final class GeminiAIService: ObservableObject {
             }
         }
 
-        // Cálculo fisiológico local equivalente (Mifflin-St Jeor + objetivo + nível de atividade) caso offline temporário
+        // Cálculo fisiológico local equivalente (Mifflin-St Jeor + objetivo + nível de atividade) caso offline temporário ou sem consentimento de IA
         let lowerAct = activityLevel.lowercased()
         let burn: Double = lowerAct.contains("intenso") ? 650.0 : (lowerAct.contains("leve") ? 350.0 : 500.0)
         let steps: Double = lowerAct.contains("intenso") ? 10000.0 : (lowerAct.contains("leve") ? 7000.0 : 8500.0)
         let idealBmiWeight = 22.5 * heightMeters * heightMeters
+        let minHealthyWeight = max(45.0, 18.5 * heightMeters * heightMeters)
         let resolvedTargetWeight: Double
         if let targetWeight, targetWeight >= 30.0 {
-            resolvedTargetWeight = (targetWeight * 10.0).rounded() / 10.0
+            let clamped = goal == .lose ? max(minHealthyWeight, targetWeight) : targetWeight
+            resolvedTargetWeight = (clamped * 10.0).rounded() / 10.0
         } else {
             switch goal {
             case .lose:
-                resolvedTargetWeight = ((max(45.0, min(currentWeight - 4.0, idealBmiWeight))) * 10.0).rounded() / 10.0
+                resolvedTargetWeight = ((max(minHealthyWeight, min(currentWeight - 4.0, idealBmiWeight))) * 10.0).rounded() / 10.0
             case .maintain:
                 resolvedTargetWeight = (currentWeight * 10.0).rounded() / 10.0
             case .gain:
@@ -803,11 +811,12 @@ public final class GeminiAIService: ObservableObject {
             targetCalorieBurn: burn,
             targetSteps: steps
         )
+        let safeDailyCalories = max(1200.0, metrics.suggestedCalories)
         let explanation = "\(safeName), calculamos sua Taxa Basal (~\(Int(metrics.tmb)) kcal) e gasto diário (~\(Int(metrics.contextualTdee)) kcal) para \(String(format: "%.1f", currentWeight)) kg e \(String(format: "%.2f", heightMeters)) m rumo aos \(String(format: "%.1f", resolvedTargetWeight)) kg."
 
         return InitialGoalsAISuggestion(
             suggestedTargetWeight: resolvedTargetWeight,
-            dailyCalories: metrics.suggestedCalories,
+            dailyCalories: safeDailyCalories,
             proteinGrams: metrics.proteinGrams,
             carbsGrams: metrics.carbsGrams,
             fatGrams: metrics.fatGrams,
@@ -828,8 +837,8 @@ public final class GeminiAIService: ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "Os recursos de Inteligência Artificial são exclusivos da camada Forma Pro."]
             )
         }
-        if !AIDataConsentManager.isConsentGranted {
-            AIDataConsentManager.shared.setConsent(true)
+        guard AIDataConsentManager.isConsentGranted else {
+            throw FormaAPIError.aiBlocked("Autorize o compartilhamento de dados com o Google Gemini nas configurações de Privacidade antes de usar recursos com IA.")
         }
         let requestEpoch = self.generationEpoch
         let data = try await FormaAPIClient.shared.requestData(

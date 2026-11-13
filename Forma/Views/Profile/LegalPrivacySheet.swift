@@ -10,6 +10,12 @@ import SwiftUI
 struct LegalPrivacySheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var aiConsent = AIDataConsentManager.shared
+    @ObservedObject private var authManager = AuthManager.shared
+
+    @State private var isExportingData: Bool = false
+    @State private var exportErrorMessage: String? = nil
+    @State private var exportedFileURL: URL? = nil
+    @State private var showExportShareSheet: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -27,10 +33,10 @@ struct LegalPrivacySheet: View {
                             Text("O Forma coleta apenas os dados necessários para calcular suas metas diárias e sincronizar seu progresso: nome, e-mail, peso, altura, objetivo corporal, refeições (incluindo fotos ou áudio enviados por você), ingestão de água, treinos e fichas.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("Controlador: Forma App (João Pedro) • Contato do Encarregado (DPO): joaopedroc035@gmail.com. Dados criptografados via TLS e senhas protegidas por BCrypt, com armazenamento em nuvem internacional segura (Supabase Inc. e Render Services Inc.).")
+                            Text("Controlador: Forma App • Encarregado pelo Tratamento de Dados (DPO): privacidade@forma.app. Dados em trânsito cifrados via TLS 1.3 e senhas protegidas por BCrypt. Suboperadores (LGPD Art. 33): Supabase Inc. (PostgreSQL com RLS e AES-256-GCM em repouso), Render Services Inc. (API), Google LLC (Gemini API opt-in sem nome/EXIF e sem treino de modelos), Resend Inc. (OTP de senha) e Apple Inc. (Sign in with Apple / HealthKit local). Registros de acesso do Marco Civil da Internet (Art. 15) são mantidos com IP cifrado por 180 dias e expurgados automaticamente.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text("Seus dados nunca são vendidos a terceiros nem usados para publicidade ou rastreamento entre aplicativos.")
+                            Text("Seus dados nunca são vendidos a terceiros, não alimentam modelos públicos de IA e não são usados para publicidade ou rastreamento entre aplicativos. Você pode peticionar perante a ANPD (LGPD Art. 18 §1º) a qualquer tempo.")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(FormaTheme.Colors.brand)
 
@@ -159,6 +165,46 @@ struct LegalPrivacySheet: View {
                     FormaCard(padding: 18) {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 8) {
+                                Image(systemName: "arrow.down.doc.fill")
+                                    .foregroundStyle(FormaTheme.Colors.brand)
+                                Text("Portabilidade de Dados (LGPD Art. 18 V)")
+                                    .font(.headline)
+                                    .foregroundStyle(FormaTheme.Colors.primaryText)
+                            }
+                            Text("Exporte a qualquer momento uma cópia completa dos seus dados cadastrais, perfil, refeições, treinos, hidratação, histórico de consentimentos e registros de auditoria de IA em formato JSON.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            if let exportErrorMessage {
+                                FormaBanner(message: exportErrorMessage, style: .error)
+                            }
+
+                            Button {
+                                exportLgpdData()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if isExportingData {
+                                        ProgressView().tint(.white)
+                                    } else {
+                                        Image(systemName: "square.and.arrow.up")
+                                    }
+                                    Text(isExportingData ? "Gerando arquivo JSON..." : "Exportar Meus Dados (JSON — LGPD Art. 18)")
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(authManager.isAuthenticated ? AnyShapeStyle(FormaTheme.Colors.brandGradient) : AnyShapeStyle(Color.gray.opacity(0.45)))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!authManager.isAuthenticated || isExportingData)
+                        }
+                    }
+
+                    FormaCard(padding: 18) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
                                 Image(systemName: "trash.slash.fill")
                                     .foregroundStyle(FormaTheme.Colors.danger)
                                 Text("Direitos LGPD & Exclusão de Conta")
@@ -186,8 +232,50 @@ struct LegalPrivacySheet: View {
                     .fontWeight(.semibold)
                 }
             }
+            .sheet(isPresented: $showExportShareSheet) {
+                if let url = exportedFileURL {
+                    LgpdShareActivitySheet(activityItems: [url])
+                }
+            }
         }
     }
+
+    private func exportLgpdData() {
+        guard authManager.isAuthenticated else {
+            exportErrorMessage = "Entre na sua conta para exportar os dados armazenados na nuvem."
+            return
+        }
+        exportErrorMessage = nil
+        isExportingData = true
+        Task {
+            do {
+                let data = try await FormaAPIClient.shared.requestData(
+                    path: "/api/privacy/export",
+                    method: "GET",
+                    authenticated: true,
+                    timeout: 20.0
+                )
+                let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("forma-dados-lgpd.json")
+                try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+                exportedFileURL = fileURL
+                isExportingData = false
+                showExportShareSheet = true
+            } catch {
+                isExportingData = false
+                exportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct LgpdShareActivitySheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 struct PasswordRecoverySheet: View {
@@ -275,11 +363,11 @@ struct PasswordRecoverySheet: View {
                                     .frame(width: 20)
                                 Group {
                                     if showNewPassword {
-                                        TextField("Nova senha (mín. 6 caracteres)", text: $newPasswordText)
+                                        TextField("Nova senha (mín. 8 caracteres)", text: $newPasswordText)
                                             .textInputAutocapitalization(.never)
                                             .autocorrectionDisabled()
                                     } else {
-                                        SecureField("Nova senha (mín. 6 caracteres)", text: $newPasswordText)
+                                        SecureField("Nova senha (mín. 8 caracteres)", text: $newPasswordText)
                                     }
                                 }
                                 .textContentType(.newPassword)
@@ -468,11 +556,11 @@ struct ChangePasswordSheet: View {
                             .frame(width: 20)
                         Group {
                             if showNewPassword {
-                                TextField("Nova senha (mín. 6 caracteres)", text: $newPassword)
+                                TextField("Nova senha (mín. 8 caracteres)", text: $newPassword)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                             } else {
-                                SecureField("Nova senha (mín. 6 caracteres)", text: $newPassword)
+                                SecureField("Nova senha (mín. 8 caracteres)", text: $newPassword)
                             }
                         }
                         .textContentType(.newPassword)

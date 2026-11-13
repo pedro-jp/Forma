@@ -490,7 +490,8 @@ struct EvolutionView: View {
             return
         }
         if !aiConsent.hasGrantedConsent {
-            aiConsent.setConsent(true)
+            showAIConsentSheet = true
+            return
         }
         performEvolutionAIAnalysis()
     }

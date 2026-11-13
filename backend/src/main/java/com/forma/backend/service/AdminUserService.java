@@ -2,11 +2,14 @@ package com.forma.backend.service;
 
 import com.forma.backend.dto.AdminDto;
 import com.forma.backend.dto.SyncDto;
+import com.forma.backend.entity.DeletedAccountTombstoneEntity;
 import com.forma.backend.entity.User;
 import com.forma.backend.entity.UserProfile;
 import com.forma.backend.exception.DomainExceptions.ResourceNotFoundException;
 import com.forma.backend.repository.*;
+import com.forma.backend.security.FieldEncryptionService;
 import com.forma.backend.websocket.AdminEventPublisherService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +36,11 @@ public class AdminUserService {
     private final AuthService authService;
     private final SocialAuthVerificationService socialAuthVerificationService;
     private final AdminEventPublisherService adminEventPublisherService;
+    private final LegalConsentLedgerRepository legalConsentLedgerRepository;
+    private final DeletedAccountTombstoneRepository deletedAccountTombstoneRepository;
+    private final FieldEncryptionService fieldEncryptionService;
 
+    @Autowired
     public AdminUserService(
         UserRepository userRepository,
         UserProfileRepository userProfileRepository,
@@ -47,7 +54,10 @@ public class AdminUserService {
         AiRequestLogRepository aiRequestLogRepository,
         AuthService authService,
         SocialAuthVerificationService socialAuthVerificationService,
-        AdminEventPublisherService adminEventPublisherService
+        AdminEventPublisherService adminEventPublisherService,
+        LegalConsentLedgerRepository legalConsentLedgerRepository,
+        DeletedAccountTombstoneRepository deletedAccountTombstoneRepository,
+        FieldEncryptionService fieldEncryptionService
     ) {
         this.userRepository = userRepository;
         this.userProfileRepository = userProfileRepository;
@@ -62,6 +72,9 @@ public class AdminUserService {
         this.authService = authService;
         this.socialAuthVerificationService = socialAuthVerificationService;
         this.adminEventPublisherService = adminEventPublisherService;
+        this.legalConsentLedgerRepository = legalConsentLedgerRepository;
+        this.deletedAccountTombstoneRepository = deletedAccountTombstoneRepository;
+        this.fieldEncryptionService = fieldEncryptionService;
     }
 
     @Transactional(readOnly = true)
@@ -309,6 +322,16 @@ public class AdminUserService {
                     googleToken
                 );
             }
+        }
+
+        if (legalConsentLedgerRepository != null && fieldEncryptionService != null) {
+            String anonId = "anon:" + fieldEncryptionService.hmacSha256Hex(userId.toString()).substring(0, 48);
+            legalConsentLedgerRepository.pseudonymizeByUserId(userId.toString(), anonId);
+        }
+        if (deletedAccountTombstoneRepository != null) {
+            deletedAccountTombstoneRepository.save(
+                new DeletedAccountTombstoneEntity(userId.toString(), "PERMANENT_DELETE")
+            );
         }
 
         foodEntryRepository.deleteByUserId(userId);

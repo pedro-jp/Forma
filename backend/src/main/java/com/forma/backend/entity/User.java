@@ -1,5 +1,6 @@
 package com.forma.backend.entity;
 
+import com.forma.backend.security.EncryptedStringAttributeConverter;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
@@ -57,10 +58,36 @@ public class User {
     @Column(name = "reset_code_expires_at")
     private Instant resetCodeExpiresAt;
 
-    @Column(name = "apple_refresh_token", length = 1024)
+    @Column(name = "reset_code_attempts")
+    private Integer resetCodeAttempts = 0;
+
+    @Column(name = "token_version")
+    private Integer tokenVersion = 1;
+
+    @Column(name = "ai_consent_granted")
+    private Boolean aiConsentGranted = false;
+
+    @Column(name = "ai_consent_updated_at")
+    private Instant aiConsentUpdatedAt;
+
+    @Column(name = "terms_accepted_version", length = 40)
+    private String termsAcceptedVersion;
+
+    @Column(name = "terms_accepted_at")
+    private Instant termsAcceptedAt;
+
+    @Column(name = "health_consent_accepted_at")
+    private Instant healthConsentAcceptedAt;
+
+    @Column(name = "age_confirmed_18_plus")
+    private Boolean ageConfirmed18Plus = false;
+
+    @Convert(converter = EncryptedStringAttributeConverter.class)
+    @Column(name = "apple_refresh_token", columnDefinition = "TEXT")
     private String appleRefreshToken;
 
-    @Column(name = "google_refresh_token", length = 1024)
+    @Convert(converter = EncryptedStringAttributeConverter.class)
+    @Column(name = "google_refresh_token", columnDefinition = "TEXT")
     private String googleRefreshToken;
 
     public User() {}
@@ -131,6 +158,30 @@ public class User {
 
     public Instant getResetCodeExpiresAt() { return resetCodeExpiresAt; }
     public void setResetCodeExpiresAt(Instant resetCodeExpiresAt) { this.resetCodeExpiresAt = resetCodeExpiresAt; }
+
+    public int getResetCodeAttempts() { return resetCodeAttempts != null ? resetCodeAttempts : 0; }
+    public void setResetCodeAttempts(Integer resetCodeAttempts) { this.resetCodeAttempts = resetCodeAttempts != null ? resetCodeAttempts : 0; }
+
+    public int getTokenVersion() { return tokenVersion != null ? tokenVersion : 1; }
+    public void setTokenVersion(Integer tokenVersion) { this.tokenVersion = tokenVersion != null ? tokenVersion : 1; }
+
+    public boolean isAiConsentGranted() { return Boolean.TRUE.equals(aiConsentGranted); }
+    public void setAiConsentGranted(Boolean aiConsentGranted) { this.aiConsentGranted = Boolean.TRUE.equals(aiConsentGranted); }
+
+    public Instant getAiConsentUpdatedAt() { return aiConsentUpdatedAt; }
+    public void setAiConsentUpdatedAt(Instant aiConsentUpdatedAt) { this.aiConsentUpdatedAt = aiConsentUpdatedAt; }
+
+    public String getTermsAcceptedVersion() { return termsAcceptedVersion; }
+    public void setTermsAcceptedVersion(String termsAcceptedVersion) { this.termsAcceptedVersion = termsAcceptedVersion; }
+
+    public Instant getTermsAcceptedAt() { return termsAcceptedAt; }
+    public void setTermsAcceptedAt(Instant termsAcceptedAt) { this.termsAcceptedAt = termsAcceptedAt; }
+
+    public Instant getHealthConsentAcceptedAt() { return healthConsentAcceptedAt; }
+    public void setHealthConsentAcceptedAt(Instant healthConsentAcceptedAt) { this.healthConsentAcceptedAt = healthConsentAcceptedAt; }
+
+    public boolean isAgeConfirmed18Plus() { return Boolean.TRUE.equals(ageConfirmed18Plus); }
+    public void setAgeConfirmed18Plus(Boolean ageConfirmed18Plus) { this.ageConfirmed18Plus = Boolean.TRUE.equals(ageConfirmed18Plus); }
 
     public String getAppleRefreshToken() { return appleRefreshToken; }
     public void setAppleRefreshToken(String appleRefreshToken) { this.appleRefreshToken = appleRefreshToken; }

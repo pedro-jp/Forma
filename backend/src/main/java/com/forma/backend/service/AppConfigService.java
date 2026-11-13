@@ -2,10 +2,12 @@ package com.forma.backend.service;
 
 import com.forma.backend.entity.AppConfigEntity;
 import com.forma.backend.repository.AppConfigRepository;
+import com.forma.backend.security.FieldEncryptionService;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class AppConfigService {
@@ -21,22 +23,36 @@ public class AppConfigService {
     public static final String DEFAULT_APPLE_TEAM_ID = "Q42LJ4LG32";
     public static final String DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
 
-    private final AppConfigRepository appConfigRepository;
+    private static final Set<String> SECRET_CONFIG_KEYS = Set.of(
+        KEY_GEMINI_API_KEY,
+        KEY_RESEND_API_KEY,
+        KEY_APPLE_PRIVATE_KEY
+    );
 
-    public AppConfigService(AppConfigRepository appConfigRepository) {
+    private final AppConfigRepository appConfigRepository;
+    private final FieldEncryptionService encryptionService;
+
+    public AppConfigService(
+        AppConfigRepository appConfigRepository,
+        FieldEncryptionService encryptionService
+    ) {
         this.appConfigRepository = appConfigRepository;
+        this.encryptionService = encryptionService;
     }
 
     @PostConstruct
     public void initDefaults() {
         if (!appConfigRepository.existsById(KEY_GEMINI_API_KEY)) {
             appConfigRepository.save(new AppConfigEntity(KEY_GEMINI_API_KEY, "", "Chave de API do Google Gemini"));
+        } else {
+            migrateSecretIfPlaintext(KEY_GEMINI_API_KEY);
         }
         if (!appConfigRepository.existsById(KEY_AI_BLOCKED)) {
             appConfigRepository.save(new AppConfigEntity(KEY_AI_BLOCKED, "false", "Bloqueio global de requisições de IA"));
         }
-        
-        // Inicializa ou migra modelos descontinuados ou sobrecarregados para gemini-3.1-flash-lite (baixa latência)
+        migrateSecretIfPlaintext(KEY_RESEND_API_KEY);
+        migrateSecretIfPlaintext(KEY_APPLE_PRIVATE_KEY);
+
         Optional<AppConfigEntity> modelEntity = appConfigRepository.findById(KEY_GEMINI_MODEL);
         if (modelEntity.isEmpty()) {
             appConfigRepository.save(new AppConfigEntity(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL, "Modelo ativo do Gemini"));
@@ -49,6 +65,16 @@ public class AppConfigService {
         }
     }
 
+    private void migrateSecretIfPlaintext(String key) {
+        appConfigRepository.findById(key).ifPresent(entity -> {
+            String val = entity.getConfigValue();
+            if (val != null && !val.isBlank() && !val.startsWith("ENC:v1:")) {
+                entity.setConfigValue(encryptionService.encrypt(val.trim()));
+                appConfigRepository.save(entity);
+            }
+        });
+    }
+
     private boolean isDeprecatedModel(String model) {
         if (model == null || model.isBlank()) return true;
         String m = model.trim().toLowerCase();
@@ -57,10 +83,7 @@ public class AppConfigService {
     }
 
     public String getGeminiApiKey() {
-        String dbValue = appConfigRepository.findById(KEY_GEMINI_API_KEY)
-            .map(AppConfigEntity::getConfigValue)
-            .orElse("")
-            .trim();
+        String dbValue = readDecryptedDbValue(KEY_GEMINI_API_KEY);
         if (!dbValue.isEmpty()) {
             return dbValue;
         }
@@ -73,10 +96,11 @@ public class AppConfigService {
     }
 
     public void setGeminiApiKey(String apiKey) {
+        String clean = apiKey != null ? apiKey.trim() : "";
         AppConfigEntity entity = appConfigRepository.findById(KEY_GEMINI_API_KEY)
             .orElse(new AppConfigEntity(KEY_GEMINI_API_KEY, "", "Chave de API do Google Gemini"));
-        entity.setConfigValue(apiKey != null ? apiKey.trim() : "");
-        appConfigRepository.save(entity);
+        entity.setConfigValue(clean.isEmpty() ? "" : encryptionService.encrypt(clean));
+        appConfigRepository.saveAndFlush(entity);
     }
 
     public String getGeminiModel() {
@@ -150,18 +174,30 @@ public class AppConfigService {
             appConfigRepository.save(e);
         }
         if (privateKeyPem != null) {
+            String clean = privateKeyPem.trim();
             AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_PRIVATE_KEY)
                 .orElse(new AppConfigEntity(KEY_APPLE_PRIVATE_KEY, "", "Apple Sign-In .p8 Private Key"));
-            e.setConfigValue(privateKeyPem.trim());
+            e.setConfigValue(clean.isEmpty() ? "" : encryptionService.encrypt(clean));
             appConfigRepository.save(e);
         }
     }
 
-    private String getConfigOrEnv(String key, String fallback) {
+    private String readDecryptedDbValue(String key) {
         String dbValue = appConfigRepository.findById(key)
             .map(AppConfigEntity::getConfigValue)
             .orElse("")
             .trim();
+        if (dbValue.isEmpty()) {
+            return "";
+        }
+        if (SECRET_CONFIG_KEYS.contains(key)) {
+            return encryptionService.decrypt(dbValue).trim();
+        }
+        return dbValue;
+    }
+
+    private String getConfigOrEnv(String key, String fallback) {
+        String dbValue = readDecryptedDbValue(key);
         if (!dbValue.isEmpty()) {
             return dbValue;
         }

@@ -652,7 +652,8 @@ struct AIWorkoutLoggerView: View {
         }
         guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         if !aiConsent.hasGrantedConsent {
-            aiConsent.setConsent(true)
+            showAIConsentSheet = true
+            return
         }
         performWorkoutAnalysis()
     }

@@ -21,12 +21,9 @@ public class HealthPingController {
 
     @RequestMapping(value = {"/ping", "/health"}, method = {RequestMethod.GET, RequestMethod.HEAD})
     public ResponseEntity<Map<String, Object>> ping() {
-        String dbUrl = environment.getProperty("spring.datasource.url", "");
-        String databaseEngine = dbUrl.startsWith("jdbc:postgresql:") ? "supabase-postgresql" : "h2-local";
         return ResponseEntity.ok(Map.of(
             "status", "ok",
             "service", "forma-backend",
-            "database", databaseEngine,
             "timestamp", Instant.now().toEpochMilli()
         ));
     }

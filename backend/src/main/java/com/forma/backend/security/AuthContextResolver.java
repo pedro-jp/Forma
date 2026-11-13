@@ -1,10 +1,10 @@
 package com.forma.backend.security;
 
+import com.forma.backend.entity.DeletedAccountTombstoneEntity;
 import com.forma.backend.entity.User;
-import com.forma.backend.entity.UserProfile;
 import com.forma.backend.exception.DomainExceptions.*;
 import com.forma.backend.repository.AiRequestLogRepository;
-import com.forma.backend.repository.UserProfileRepository;
+import com.forma.backend.repository.DeletedAccountTombstoneRepository;
 import com.forma.backend.repository.UserRepository;
 import com.forma.backend.service.AppConfigService;
 import com.forma.backend.service.JwtService;
@@ -12,41 +12,42 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class AuthContextResolver {
 
     public static final String ADMIN_COOKIE_NAME = "forma_admin_token";
+    private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
-    private final UserProfileRepository userProfileRepository;
+    private final DeletedAccountTombstoneRepository tombstoneRepository;
     private final AppConfigService appConfigService;
     private final AiRequestLogRepository aiRequestLogRepository;
     private final String configuredAdminPassword;
     private final String configuredAdminKey;
-    private final Set<UUID> deletedUserIds = ConcurrentHashMap.newKeySet();
 
     public AuthContextResolver(
         JwtService jwtService,
         UserRepository userRepository,
-        UserProfileRepository userProfileRepository,
+        DeletedAccountTombstoneRepository tombstoneRepository,
         AppConfigService appConfigService,
         AiRequestLogRepository aiRequestLogRepository,
-        @Value("${app.admin.password:admin123}") String configuredAdminPassword,
+        @Value("${app.admin.password:}") String configuredAdminPassword,
         @Value("${app.admin.key:}") String configuredAdminKey
     ) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
-        this.userProfileRepository = userProfileRepository;
+        this.tombstoneRepository = tombstoneRepository;
         this.appConfigService = appConfigService;
         this.aiRequestLogRepository = aiRequestLogRepository;
         this.configuredAdminPassword = configuredAdminPassword;
@@ -55,39 +56,26 @@ public class AuthContextResolver {
 
     public void markUserDeleted(UUID userId) {
         if (userId != null) {
-            deletedUserIds.add(userId);
+            tombstoneRepository.save(new DeletedAccountTombstoneEntity(userId.toString(), "ACCOUNT_DELETED"));
         }
     }
 
-    public UUID resolveOptionalUserId(String authHeader, String fallbackUserId) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7).trim();
-            if (!token.isEmpty() && jwtService.validateToken(token)) {
-                try {
-                    return jwtService.getUserIdFromToken(token);
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        if (fallbackUserId != null && !fallbackUserId.isBlank()) {
-            try {
-                return UUID.fromString(fallbackUserId.trim());
-            } catch (Exception ignored) {
-            }
-        }
-        return null;
-    }
-
-    public User requireActiveUser(String authHeader, String fallbackUserId) {
-        UUID userId = resolveOptionalUserId(authHeader, fallbackUserId);
-        if (userId == null) {
+    public User requireActiveUser(String authHeader) {
+        String token = extractBearerToken(authHeader);
+        if (token == null || !jwtService.validateToken(token)) {
             throw new UnauthorizedAccessException("Sessão inválida ou não autenticada.");
         }
-        String tokenEmail = extractBearerEmail(authHeader);
-        return verifyUserAccountActive(userId, tokenEmail);
+        UUID userId;
+        try {
+            userId = jwtService.getUserIdFromToken(token);
+        } catch (Exception e) {
+            throw new UnauthorizedAccessException("Sessão inválida ou não autenticada.");
+        }
+        int tokenVersion = jwtService.extractTokenVersion(token);
+        return verifyUserAccountActive(userId, tokenVersion);
     }
 
-    public UUID validateAiAccess(String authHeader, String fallbackUserId) {
+    public UUID validateAiAccess(String authHeader) {
         if (appConfigService.isAiBlocked()) {
             throw new AiBlockedException(
                 "As análises de Inteligência Artificial foram temporariamente pausadas no painel administrativo.",
@@ -95,33 +83,35 @@ public class AuthContextResolver {
             );
         }
 
-        UUID userId = resolveOptionalUserId(authHeader, fallbackUserId);
-        if (userId != null) {
-            String tokenEmail = extractBearerEmail(authHeader);
-            User user = verifyUserAccountActive(userId, tokenEmail);
-            if (!user.isPro()) {
-                throw new AiBlockedException(
-                    "Esta conta está na camada Free (Essencial). Os recursos de Inteligência Artificial são exclusivos da camada Forma Pro.",
-                    false
+        User user = requireActiveUser(authHeader);
+
+        if (!user.isPro()) {
+            throw new AiBlockedException(
+                "Esta conta está na camada Free (Essencial). Os recursos de Inteligência Artificial são exclusivos da camada Forma Pro.",
+                false
+            );
+        }
+        if (user.isAiBlocked()) {
+            throw new AiBlockedException(
+                "O acesso à Inteligência Artificial está desativado para esta conta.",
+                false
+            );
+        }
+        if (!user.isAiConsentGranted()) {
+            throw new AiConsentRequiredException(
+                "Consentimento específico pendente para envio de dados ao Google Gemini (LGPD Art. 11). Autorize nas opções de Privacidade."
+            );
+        }
+        if (user.getDailyAiLimit() != null && user.getDailyAiLimit() > 0) {
+            Instant startOfDay = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
+            long usedToday = aiRequestLogRepository.countByUserIdAndCreatedAtAfter(user.getId(), startOfDay);
+            if (usedToday >= user.getDailyAiLimit()) {
+                throw new AiQuotaExceededException(
+                    "Limite diário de IA atingido (" + usedToday + "/" + user.getDailyAiLimit() + " análises hoje)."
                 );
-            }
-            if (user.isAiBlocked()) {
-                throw new AiBlockedException(
-                    "O acesso à Inteligência Artificial está desativado para esta conta.",
-                    false
-                );
-            }
-            if (user.getDailyAiLimit() != null && user.getDailyAiLimit() > 0) {
-                Instant startOfDay = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
-                long usedToday = aiRequestLogRepository.countByUserIdAndCreatedAtAfter(userId, startOfDay);
-                if (usedToday >= user.getDailyAiLimit()) {
-                    throw new AiQuotaExceededException(
-                        "Limite diário de IA atingido (" + usedToday + "/" + user.getDailyAiLimit() + " análises hoje)."
-                    );
-                }
             }
         }
-        return userId;
+        return user.getId();
     }
 
     public boolean isAdminAuthenticated(HttpServletRequest request, String adminKey, String cookieToken) {
@@ -154,16 +144,23 @@ public class AuthContextResolver {
         }
         if (headerKey != null && !headerKey.isBlank()) {
             String trimmed = headerKey.trim();
-            boolean matchesKey = configuredAdminKey != null
-                && !configuredAdminKey.trim().isEmpty()
-                && trimmed.equals(configuredAdminKey.trim());
-            boolean matchesPassword = configuredAdminPassword != null
-                && !configuredAdminPassword.trim().isEmpty()
-                && trimmed.equals(configuredAdminPassword.trim());
+            boolean matchesKey = constantTimeSecretMatch(trimmed, configuredAdminKey);
+            boolean matchesPassword = constantTimeSecretMatch(trimmed, configuredAdminPassword);
             return matchesKey || matchesPassword;
         }
 
         return false;
+    }
+
+    public boolean constantTimeSecretMatch(String provided, String configured) {
+        if (provided == null || configured == null) return false;
+        String c = configured.trim();
+        String p = provided.trim();
+        if (c.isEmpty() || p.isEmpty()) return false;
+        if (c.startsWith("$2a$") || c.startsWith("$2b$") || c.startsWith("$2y$")) {
+            return BCRYPT.matches(p, c);
+        }
+        return MessageDigest.isEqual(p.getBytes(StandardCharsets.UTF_8), c.getBytes(StandardCharsets.UTF_8));
     }
 
     public void requireAdmin(HttpServletRequest request, String adminKey, String cookieToken) {
@@ -172,43 +169,27 @@ public class AuthContextResolver {
         }
     }
 
-    private String extractBearerEmail(String authHeader) {
+    private String extractBearerToken(String authHeader) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7).trim();
-            if (!token.isEmpty() && jwtService.validateToken(token)) {
-                return jwtService.getEmailFromToken(token);
+            if (!token.isEmpty()) {
+                return token;
             }
         }
         return null;
     }
 
-    private User verifyUserAccountActive(UUID userId, String tokenEmail) {
-        if (deletedUserIds.contains(userId)) {
+    private User verifyUserAccountActive(UUID userId, int tokenVersion) {
+        if (tombstoneRepository.existsById(userId.toString())) {
             throw new AccountDeletedException("Conta não encontrada ou removida pelo administrador.");
         }
 
-        User user = userRepository.findById(userId).orElseGet(() -> {
-            if (tokenEmail != null && !tokenEmail.isBlank()) {
-                var byEmail = userRepository.findByEmail(tokenEmail.trim().toLowerCase());
-                if (byEmail.isPresent()) {
-                    return byEmail.get();
-                }
-                // Auto-provisiona a conta do token JWT válido quando o banco do backend foi recém-criado/migrado
-                User restored = new User(
-                    tokenEmail.trim().toLowerCase(),
-                    "Atleta Forma",
-                    "EMAIL",
-                    null
-                );
-                restored.setId(userId);
-                User saved = userRepository.save(restored);
-                if (!userProfileRepository.existsById(saved.getId())) {
-                    userProfileRepository.save(new UserProfile(saved.getId()));
-                }
-                return saved;
-            }
-            throw new AccountDeletedException("Conta não encontrada ou removida pelo administrador.");
-        });
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new AccountDeletedException("Conta não encontrada ou removida pelo administrador."));
+
+        if (user.getTokenVersion() != tokenVersion) {
+            throw new UnauthorizedAccessException("Sessão revogada por segurança. Faça login novamente.");
+        }
 
         if (user.isPaused()) {
             String suffix = (user.getPausedReason() != null && !user.getPausedReason().isBlank())

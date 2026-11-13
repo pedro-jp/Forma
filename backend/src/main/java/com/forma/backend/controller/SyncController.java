@@ -41,10 +41,9 @@ public class SyncController {
     @PostMapping("/push")
     public ResponseEntity<?> push(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.SyncPushRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
 
         if (user.getForceResetAt() != null) {
             long resetEpoch = user.getForceResetAt().toEpochMilli();
@@ -72,22 +71,18 @@ public class SyncController {
 
     @GetMapping("/pull")
     public ResponseEntity<SyncDto.SyncPullResponse> pull(
-        @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId
+        @RequestHeader(value = "Authorization", required = false) String authHeader
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         return ResponseEntity.ok(syncService.pullData(user.getId()));
     }
-
-    // MARK: - Endpoints Atômicos Remote-First (Banco Primeiro -> Cache Celular Depois)
 
     @PutMapping("/profile")
     public ResponseEntity<Map<String, Object>> saveProfile(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.ProfileWriteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         Map<String, Object> result = syncService.saveProfileDirect(user.getId(), request);
         publishAdminSync("PROFILE_UPDATED", 1);
         return ResponseEntity.ok(result);
@@ -96,10 +91,9 @@ public class SyncController {
     @PostMapping("/foods")
     public ResponseEntity<Map<String, Object>> saveFoods(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.FoodBatchWriteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         List<SyncDto.FoodDto> saved = syncService.saveFoodsDirect(user.getId(), request);
         publishAdminSync("FOOD_CREATED", saved.size());
         return ResponseEntity.ok(Map.of("status", "saved", "foods", saved));
@@ -108,10 +102,9 @@ public class SyncController {
     @DeleteMapping("/foods/{id}")
     public ResponseEntity<Map<String, Object>> deleteFood(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @PathVariable UUID id
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         syncService.deleteFoodDirect(user.getId(), id);
         publishAdminSync("FOOD_DELETED", 1);
         return ResponseEntity.ok(Map.of("status", "deleted"));
@@ -120,10 +113,9 @@ public class SyncController {
     @PostMapping("/foods/delete-batch")
     public ResponseEntity<Map<String, Object>> deleteFoodsBatch(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.BatchDeleteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         List<UUID> ids = request != null && request.ids() != null ? request.ids() : List.of();
         syncService.deleteFoodsBatchDirect(user.getId(), ids);
         publishAdminSync("FOOD_BATCH_DELETED", ids.size());
@@ -133,10 +125,9 @@ public class SyncController {
     @PostMapping("/workouts")
     public ResponseEntity<Map<String, Object>> saveWorkout(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.WorkoutWriteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         SyncDto.WorkoutDto saved = syncService.saveWorkoutDirect(user.getId(), request);
         publishAdminSync("WORKOUT_CREATED", 1);
         return ResponseEntity.ok(Map.of("status", "saved", "workout", saved));
@@ -145,10 +136,9 @@ public class SyncController {
     @DeleteMapping("/workouts/{id}")
     public ResponseEntity<Map<String, Object>> deleteWorkout(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @PathVariable UUID id
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         syncService.deleteWorkoutDirect(user.getId(), id);
         publishAdminSync("WORKOUT_DELETED", 1);
         return ResponseEntity.ok(Map.of("status", "deleted"));
@@ -157,10 +147,9 @@ public class SyncController {
     @PostMapping("/routines")
     public ResponseEntity<Map<String, Object>> saveRoutine(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.RoutineDto request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         SyncDto.RoutineDto saved = syncService.saveRoutineDirect(user.getId(), request);
         publishAdminSync("ROUTINE_SAVED", 1);
         return ResponseEntity.ok(Map.of("status", "saved", "routine", saved));
@@ -169,10 +158,9 @@ public class SyncController {
     @DeleteMapping("/routines/{id}")
     public ResponseEntity<Map<String, Object>> deleteRoutine(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @PathVariable UUID id
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         syncService.deleteRoutineDirect(user.getId(), id);
         publishAdminSync("ROUTINE_DELETED", 1);
         return ResponseEntity.ok(Map.of("status", "deleted"));
@@ -181,10 +169,9 @@ public class SyncController {
     @PostMapping("/waters")
     public ResponseEntity<Map<String, Object>> saveWater(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.WaterWriteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         SyncDto.WaterDto saved = syncService.saveWaterDirect(user.getId(), request);
         publishAdminSync("WATER_SAVED", 1);
         return ResponseEntity.ok(Map.of("status", "saved", "water", saved));
@@ -193,10 +180,9 @@ public class SyncController {
     @DeleteMapping("/waters/{id}")
     public ResponseEntity<Map<String, Object>> deleteWater(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @PathVariable UUID id
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         syncService.deleteWaterDirect(user.getId(), id);
         publishAdminSync("WATER_DELETED", 1);
         return ResponseEntity.ok(Map.of("status", "deleted"));
@@ -205,10 +191,9 @@ public class SyncController {
     @PostMapping("/weights")
     public ResponseEntity<Map<String, Object>> saveWeight(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.WeightWriteRequest request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         SyncDto.WeightDto saved = syncService.saveWeightDirect(user.getId(), request);
         publishAdminSync("WEIGHT_SAVED", 1);
         return ResponseEntity.ok(Map.of("status", "saved", "weight", saved));
@@ -217,10 +202,9 @@ public class SyncController {
     @DeleteMapping("/weights/{id}")
     public ResponseEntity<Map<String, Object>> deleteWeight(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @PathVariable UUID id
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         syncService.deleteWeightDirect(user.getId(), id);
         publishAdminSync("WEIGHT_DELETED", 1);
         return ResponseEntity.ok(Map.of("status", "deleted"));
@@ -229,10 +213,9 @@ public class SyncController {
     @PostMapping("/analyses")
     public ResponseEntity<Map<String, Object>> saveAnalysis(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody SyncDto.AiAnalysisDto request
     ) {
-        User user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        User user = authContextResolver.requireActiveUser(authHeader);
         SyncDto.AiAnalysisDto saved = syncService.saveAnalysisDirect(user.getId(), request);
         publishAdminSync("ANALYSIS_SAVED", 1);
         return ResponseEntity.ok(Map.of("status", "saved", "analysis", saved));

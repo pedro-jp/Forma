@@ -6,7 +6,19 @@ public class AuthDto {
 
     public record LoginRequest(String email, String password) {}
 
-    public record RegisterRequest(String email, String password, String name) {}
+    public record RegisterRequest(
+        String email,
+        String password,
+        String name,
+        Boolean ageConfirmed18Plus,
+        Boolean sensitiveHealthConsentGranted,
+        Boolean aiConsentGranted,
+        String termsVersion
+    ) {
+        public RegisterRequest(String email, String password, String name) {
+            this(email, password, name, null, null, null, null);
+        }
+    }
 
     public record ForgotPasswordRequest(String email) {}
 
@@ -15,17 +27,36 @@ public class AuthDto {
     public record ChangePasswordRequest(String currentPassword, String newPassword) {}
 
     public record SocialLoginRequest(
-        String provider,       // GOOGLE ou APPLE
+        String provider,
         String idToken,
         String email,
         String name,
         String providerId,
-        String nonce,          // Nonce original para prevenção de replay attacks no Sign in with Apple
+        String nonce,
         Boolean isRegisterIntent,
         Boolean confirmExisting,
-        String authorizationCode, // Código OAuth efêmero da Apple para troca/revogação (Guideline 5.1.1(v))
-        String oauthRefreshToken  // Refresh/Access token OAuth do Google para revogação na exclusão de conta
+        String authorizationCode,
+        String oauthRefreshToken,
+        Boolean ageConfirmed18Plus,
+        Boolean sensitiveHealthConsentGranted,
+        Boolean aiConsentGranted,
+        String termsVersion
     ) {
+        public SocialLoginRequest(
+            String provider,
+            String idToken,
+            String email,
+            String name,
+            String providerId,
+            String nonce,
+            Boolean isRegisterIntent,
+            Boolean confirmExisting,
+            String authorizationCode,
+            String oauthRefreshToken
+        ) {
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, authorizationCode, oauthRefreshToken, null, null, null, null);
+        }
+
         public SocialLoginRequest(
             String provider,
             String idToken,
@@ -37,7 +68,7 @@ public class AuthDto {
             Boolean confirmExisting,
             String authorizationCode
         ) {
-            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, authorizationCode, null);
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, authorizationCode, null, null, null, null, null);
         }
 
         public SocialLoginRequest(
@@ -50,7 +81,7 @@ public class AuthDto {
             Boolean isRegisterIntent,
             Boolean confirmExisting
         ) {
-            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, null, null);
+            this(provider, idToken, email, name, providerId, nonce, isRegisterIntent, confirmExisting, null, null, null, null, null, null);
         }
 
         public SocialLoginRequest(
@@ -61,11 +92,11 @@ public class AuthDto {
             String providerId,
             String nonce
         ) {
-            this(provider, idToken, email, name, providerId, nonce, false, true, null, null);
+            this(provider, idToken, email, name, providerId, nonce, false, true, null, null, null, null, null, null);
         }
 
         public SocialLoginRequest(String provider, String idToken, String email, String name, String providerId) {
-            this(provider, idToken, email, name, providerId, null, false, true, null, null);
+            this(provider, idToken, email, name, providerId, null, false, true, null, null, null, null, null, null);
         }
     }
 
@@ -82,6 +113,9 @@ public class AuthDto {
         String name,
         String authProvider,
         String accountTier,
+        boolean aiConsentGranted,
+        boolean healthConsentGranted,
+        boolean ageConfirmed18Plus,
         SyncDto.ProfileDto profile
     ) {
         public AuthResponse(
@@ -90,9 +124,21 @@ public class AuthDto {
             String email,
             String name,
             String authProvider,
+            String accountTier,
             SyncDto.ProfileDto profile
         ) {
-            this(token, userId, email, name, authProvider, "FREE", profile);
+            this(token, userId, email, name, authProvider, accountTier, false, false, false, profile);
+        }
+
+        public AuthResponse(
+            String token,
+            UUID userId,
+            String email,
+            String name,
+            String authProvider,
+            SyncDto.ProfileDto profile
+        ) {
+            this(token, userId, email, name, authProvider, "FREE", false, false, false, profile);
         }
     }
 }

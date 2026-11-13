@@ -36,9 +36,52 @@ public final class AIDataConsentManager: ObservableObject {
         UserDefaults.standard.bool(forKey: resolvedStorageKey)
     }
 
-    public func setConsent(_ granted: Bool) {
+    public func setLocalCacheOnly(_ granted: Bool) {
         UserDefaults.standard.set(granted, forKey: Self.resolvedStorageKey)
         self.hasGrantedConsent = granted
+    }
+
+    public func setConsent(_ granted: Bool) {
+        setLocalCacheOnly(granted)
+        guard AuthManager.shared.isAuthenticated,
+              let token = AuthManager.shared.jwtToken,
+              !token.isEmpty else {
+            return
+        }
+        Task {
+            _ = try? await FormaAPIClient.shared.requestData(
+                path: "/api/privacy/consents",
+                method: "POST",
+                jsonBody: [
+                    "aiConsentGranted": granted,
+                    "documentVersion": "2026-11-v2",
+                    "sourcePlatform": "ios"
+                ],
+                authenticated: true,
+                timeout: 10.0,
+                interceptAccountStatus: false
+            )
+        }
+    }
+
+    public func refreshFromBackendIfAuthenticated() async {
+        guard AuthManager.shared.isAuthenticated,
+              let token = AuthManager.shared.jwtToken,
+              !token.isEmpty else {
+            return
+        }
+        guard let data = try? await FormaAPIClient.shared.requestData(
+            path: "/api/privacy/consents",
+            method: "GET",
+            authenticated: true,
+            timeout: 10.0,
+            interceptAccountStatus: false
+        ),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let remoteGranted = json["aiConsentGranted"] as? Bool else {
+            return
+        }
+        setLocalCacheOnly(remoteGranted)
     }
 
     public func refreshForCurrentUser() {

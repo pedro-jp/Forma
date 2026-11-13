@@ -1096,6 +1096,7 @@ public final class FormaDataStore {
             EvolutionAnalysisStore.shared.clear()
             AppActivityLogManager.shared.clearAll()
             SharedWorkoutSessionManager.shared.clearSession()
+            WidgetDataManager.shared.clearAllUserData()
 
             syncTodayData(skipCloudSyncTrigger: true)
             WidgetCenter.shared.reloadAllTimelines()

@@ -30,20 +30,14 @@ public final class DomainExceptions {
 
     public static class AccountAlreadyExistsException extends RuntimeException {
         private final String email;
-        private final String existingName;
 
-        public AccountAlreadyExistsException(String message, String email, String existingName) {
+        public AccountAlreadyExistsException(String message, String email, String ignoredName) {
             super(message);
             this.email = email;
-            this.existingName = existingName;
         }
 
         public String getEmail() {
             return email;
-        }
-
-        public String getExistingName() {
-            return existingName;
         }
     }
 
@@ -60,8 +54,20 @@ public final class DomainExceptions {
         }
     }
 
+    public static class AiConsentRequiredException extends RuntimeException {
+        public AiConsentRequiredException(String message) {
+            super(message);
+        }
+    }
+
     public static class AiQuotaExceededException extends RuntimeException {
         public AiQuotaExceededException(String message) {
+            super(message);
+        }
+    }
+
+    public static class RateLimitExceededException extends RuntimeException {
+        public RateLimitExceededException(String message) {
             super(message);
         }
     }

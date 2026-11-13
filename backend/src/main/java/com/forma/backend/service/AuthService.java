@@ -10,6 +10,10 @@ import com.forma.backend.exception.DomainExceptions.AccountPausedException;
 import com.forma.backend.exception.DomainExceptions.InvalidCredentialsException;
 import com.forma.backend.repository.UserProfileRepository;
 import com.forma.backend.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,44 +34,58 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 @Service
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final BCryptPasswordEncoder BCRYPT_ENCODER = new BCryptPasswordEncoder(10);
+    private static final BCryptPasswordEncoder BCRYPT_ENCODER = new BCryptPasswordEncoder(12);
+    private static final int MAX_RESET_CODE_ATTEMPTS = 5;
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
     private final JwtService jwtService;
     private final SocialAuthVerificationService socialAuthVerificationService;
     private final AppConfigService appConfigService;
+    private final PrivacyComplianceService privacyComplianceService;
+    private final MciAccessLogService mciAccessLogService;
+    private final boolean allowDevSocialMock;
 
     public AuthService(
         UserRepository userRepository,
         UserProfileRepository userProfileRepository,
         JwtService jwtService,
         SocialAuthVerificationService socialAuthVerificationService,
-        AppConfigService appConfigService
+        AppConfigService appConfigService,
+        PrivacyComplianceService privacyComplianceService,
+        MciAccessLogService mciAccessLogService,
+        @Value("${app.auth.allow-dev-social-mock:false}") boolean allowDevSocialMock
     ) {
         this.userRepository = userRepository;
         this.userProfileRepository = userProfileRepository;
         this.jwtService = jwtService;
         this.socialAuthVerificationService = socialAuthVerificationService;
         this.appConfigService = appConfigService;
+        this.privacyComplianceService = privacyComplianceService;
+        this.mciAccessLogService = mciAccessLogService;
+        this.allowDevSocialMock = allowDevSocialMock;
     }
 
     @Transactional
-    public AuthDto.AuthResponse register(AuthDto.RegisterRequest request) {
+    public AuthDto.AuthResponse register(AuthDto.RegisterRequest request, HttpServletRequest httpRequest) {
         if (request == null || request.email() == null || request.email().isBlank()) {
             throw new IllegalArgumentException("E-mail é obrigatório.");
         }
-        if (request.password() == null || request.password().isBlank()) {
-            throw new IllegalArgumentException("Senha é obrigatória.");
+        if (request.password() == null || request.password().trim().length() < 8) {
+            throw new IllegalArgumentException("A senha deve ter pelo menos 8 caracteres.");
         }
+        if (Boolean.FALSE.equals(request.ageConfirmed18Plus())) {
+            throw new IllegalArgumentException("É necessário confirmar ter 18 anos ou mais para criar conta no Forma.");
+        }
+        if (Boolean.FALSE.equals(request.sensitiveHealthConsentGranted())) {
+            throw new IllegalArgumentException("É necessário autorizar o tratamento dos dados de saúde para usar o aplicativo.");
+        }
+
         String normalizedEmail = request.email().trim().toLowerCase();
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw new IllegalArgumentException("E-mail já cadastrado.");
@@ -76,78 +94,94 @@ public class AuthService {
         User user = new User();
         user.setEmail(normalizedEmail);
         user.setName(request.name() != null && !request.name().isBlank() ? request.name().trim() : "Usuário");
-        user.setPasswordHash(hashPassword(request.password()));
+        user.setPasswordHash(hashPassword(request.password().trim()));
         user.setAuthProvider("EMAIL");
         user.setCreatedAt(Instant.now());
         user.setLastLoginAt(Instant.now());
+        user.setTokenVersion(1);
 
         User savedUser = userRepository.save(user);
         UserProfile profile = userProfileRepository.save(new UserProfile(savedUser.getId()));
 
-        String token = jwtService.generateToken(savedUser.getId(), savedUser.getEmail());
+        privacyComplianceService.recordRegistrationConsentsIfProvided(
+            savedUser,
+            request.ageConfirmed18Plus(),
+            null,
+            request.sensitiveHealthConsentGranted(),
+            request.aiConsentGranted(),
+            request.termsVersion(),
+            httpRequest
+        );
+
+        mciAccessLogService.recordAccessEvent(savedUser.getId().toString(), "REGISTER", httpRequest);
+
+        String token = jwtService.generateToken(savedUser);
         return toAuthResponse(savedUser, profile, token);
     }
 
     @Transactional
-    public AuthDto.AuthResponse login(AuthDto.LoginRequest request) {
+    public AuthDto.AuthResponse login(AuthDto.LoginRequest request, HttpServletRequest httpRequest) {
         if (request == null || request.email() == null || request.password() == null) {
             throw new IllegalArgumentException("E-mail e senha são obrigatórios.");
         }
         String normalizedEmail = request.email().trim().toLowerCase();
         User user = userRepository.findByEmail(normalizedEmail)
-            .orElseThrow(() -> new InvalidCredentialsException("Usuário ou senha incorretos."));
+            .orElseThrow(() -> {
+                mciAccessLogService.recordAccessEvent(normalizedEmail, "LOGIN_FAILED", httpRequest);
+                return new InvalidCredentialsException("Usuário ou senha incorretos.");
+            });
 
         if (!matchesPassword(request.password(), user.getPasswordHash())) {
+            mciAccessLogService.recordAccessEvent(user.getId().toString(), "LOGIN_FAILED", httpRequest);
             throw new InvalidCredentialsException("Usuário ou senha incorretos.");
         }
         assertUserNotPaused(user);
 
-        // Migração transparente de hashes legados SHA-256 para BCrypt (LGPD Art. 46)
         if (!isBcryptHash(user.getPasswordHash())) {
             user.setPasswordHash(hashPassword(request.password()));
         }
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
 
+        mciAccessLogService.recordAccessEvent(user.getId().toString(), "LOGIN_SUCCESS", httpRequest);
+
         UserProfile profile = userProfileRepository.findById(user.getId())
             .orElseGet(() -> userProfileRepository.save(new UserProfile(user.getId())));
 
-        String token = jwtService.generateToken(user.getId(), user.getEmail());
+        String token = jwtService.generateToken(user);
         return toAuthResponse(user, profile, token);
     }
 
     @Transactional
-    public AuthDto.AuthResponse socialLogin(AuthDto.SocialLoginRequest request) {
+    public AuthDto.AuthResponse socialLogin(AuthDto.SocialLoginRequest request, HttpServletRequest httpRequest) {
         if (request == null) {
             throw new IllegalArgumentException("Dados de login social ausentes.");
         }
-        String provider = request.provider() != null ? request.provider().toUpperCase() : "EMAIL";
+        String provider = request.provider() != null ? request.provider().toUpperCase().trim() : "EMAIL";
         String resolvedProviderId = request.providerId();
         String resolvedEmail = request.email();
         String resolvedName = request.name();
+        boolean verifiedEmailClaim = false;
 
         if (request.idToken() != null && !request.idToken().isBlank()) {
-            try {
-                SocialAuthVerificationService.VerifiedSocialUser verified = socialAuthVerificationService.verifyToken(
-                    provider,
-                    request.idToken(),
-                    request.nonce(),
-                    request.name()
-                );
-                resolvedProviderId = verified.sub();
-                if (verified.email() != null && !verified.email().isBlank()) {
-                    resolvedEmail = verified.email();
-                }
-                if (verified.name() != null && !verified.name().isBlank()) {
-                    resolvedName = verified.name();
-                }
-            } catch (Exception e) {
-                if (request.idToken().contains(".")
-                    && !request.idToken().startsWith("apple_identity_token")
-                    && !request.idToken().startsWith("google_identity_token")) {
-                    throw new IllegalArgumentException("Falha na validação do token social: " + e.getMessage());
-                }
+            SocialAuthVerificationService.VerifiedSocialUser verified = socialAuthVerificationService.verifyToken(
+                provider,
+                request.idToken(),
+                request.nonce(),
+                request.name()
+            );
+            resolvedProviderId = (resolvedProviderId != null && !resolvedProviderId.isBlank() && allowDevSocialMock && verified.sub().endsWith("_sim_test"))
+                ? resolvedProviderId
+                : verified.sub();
+            if (verified.email() != null && !verified.email().isBlank()) {
+                resolvedEmail = verified.email();
             }
+            if (verified.name() != null && !verified.name().isBlank()) {
+                resolvedName = verified.name();
+            }
+            verifiedEmailClaim = verified.emailVerified();
+        } else if (!allowDevSocialMock) {
+            throw new InvalidCredentialsException("Identity Token social obrigatório.");
         }
 
         String providerId = (resolvedProviderId != null && !resolvedProviderId.isBlank())
@@ -162,7 +196,15 @@ public class AuthService {
             existing = userRepository.findByAuthProviderAndProviderId(provider, providerId);
         }
         if (existing.isEmpty() && !normalizedEmail.isBlank()) {
-            existing = userRepository.findByEmail(normalizedEmail);
+            Optional<User> byEmail = userRepository.findByEmail(normalizedEmail);
+            if (byEmail.isPresent()) {
+                User candidate = byEmail.get();
+                boolean sameProvider = provider.equalsIgnoreCase(candidate.getAuthProvider());
+                if (!sameProvider && !verifiedEmailClaim && !allowDevSocialMock) {
+                    throw new InvalidCredentialsException("O e-mail informado pelo provedor social não foi verificado para vinculação automática.");
+                }
+                existing = byEmail;
+            }
         }
 
         User user;
@@ -178,7 +220,7 @@ public class AuthService {
                     throw new AccountAlreadyExistsException(
                         "Já existe uma conta cadastrada com o e-mail " + user.getEmail() + ". Deseja entrar nessa conta?",
                         user.getEmail(),
-                        user.getName()
+                        null
                     );
                 }
             }
@@ -201,6 +243,7 @@ public class AuthService {
             user.setProviderId(providerId);
             user.setCreatedAt(Instant.now());
             user.setLastLoginAt(Instant.now());
+            user.setTokenVersion(1);
             user = userRepository.save(user);
             userProfileRepository.save(new UserProfile(user.getId()));
         }
@@ -223,15 +266,26 @@ public class AuthService {
         }
 
         User savedUser = userRepository.save(user);
+        privacyComplianceService.recordRegistrationConsentsIfProvided(
+            savedUser,
+            request.ageConfirmed18Plus(),
+            null,
+            request.sensitiveHealthConsentGranted(),
+            request.aiConsentGranted(),
+            request.termsVersion(),
+            httpRequest
+        );
+        mciAccessLogService.recordAccessEvent(savedUser.getId().toString(), "SOCIAL_LOGIN", httpRequest);
+
         UserProfile profile = userProfileRepository.findById(savedUser.getId())
             .orElseGet(() -> userProfileRepository.save(new UserProfile(savedUser.getId())));
 
-        String token = jwtService.generateToken(savedUser.getId(), savedUser.getEmail());
+        String token = jwtService.generateToken(savedUser);
         return toAuthResponse(savedUser, profile, token);
     }
 
     @Transactional
-    public void requestPasswordReset(String email) {
+    public void requestPasswordReset(String email, HttpServletRequest httpRequest) {
         if (email == null || email.isBlank()) {
             throw new IllegalArgumentException("Informe o e-mail cadastrado.");
         }
@@ -247,21 +301,23 @@ public class AuthService {
         String code = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
         user.setResetCodeHash(hashPassword(code));
         user.setResetCodeExpiresAt(Instant.now().plusSeconds(900));
+        user.setResetCodeAttempts(0);
         userRepository.save(user);
 
-        dispatchRecoveryEmailOrLog(normalizedEmail, user.getName(), code);
+        mciAccessLogService.recordAccessEvent(user.getId().toString(), "PASSWORD_RESET_REQUEST", httpRequest);
+        dispatchRecoveryEmailOrWarn(normalizedEmail, user.getName(), code);
     }
 
-    @Transactional
-    public AuthDto.AuthResponse resetPasswordWithCode(AuthDto.ResetPasswordRequest request) {
+    @Transactional(noRollbackFor = InvalidCredentialsException.class)
+    public AuthDto.AuthResponse resetPasswordWithCode(AuthDto.ResetPasswordRequest request, HttpServletRequest httpRequest) {
         if (request == null || request.email() == null || request.email().isBlank()) {
             throw new IllegalArgumentException("Informe o e-mail da conta.");
         }
         if (request.code() == null || request.code().trim().length() != 6) {
             throw new IllegalArgumentException("Informe o código de 6 dígitos.");
         }
-        if (request.newPassword() == null || request.newPassword().trim().length() < 6) {
-            throw new IllegalArgumentException("A nova senha deve ter pelo menos 6 caracteres.");
+        if (request.newPassword() == null || request.newPassword().trim().length() < 8) {
+            throw new IllegalArgumentException("A nova senha deve ter pelo menos 8 caracteres.");
         }
 
         String normalizedEmail = request.email().trim().toLowerCase();
@@ -275,27 +331,49 @@ public class AuthService {
             throw new InvalidCredentialsException("Código expirado. Solicite um novo código.");
         }
 
+        if (user.getResetCodeAttempts() >= MAX_RESET_CODE_ATTEMPTS) {
+            user.setResetCodeHash(null);
+            user.setResetCodeExpiresAt(null);
+            userRepository.save(user);
+            throw new InvalidCredentialsException("Código bloqueado por excesso de tentativas. Solicite um novo código.");
+        }
+
         if (!matchesPassword(request.code().trim(), user.getResetCodeHash())) {
-            throw new InvalidCredentialsException("Código de verificação incorreto.");
+            int nextAttempts = user.getResetCodeAttempts() + 1;
+            user.setResetCodeAttempts(nextAttempts);
+            if (nextAttempts >= MAX_RESET_CODE_ATTEMPTS) {
+                user.setResetCodeHash(null);
+                user.setResetCodeExpiresAt(null);
+            }
+            userRepository.save(user);
+            throw new InvalidCredentialsException(
+                nextAttempts >= MAX_RESET_CODE_ATTEMPTS
+                    ? "Código bloqueado por excesso de tentativas. Solicite um novo código."
+                    : "Código de verificação incorreto."
+            );
         }
 
         user.setPasswordHash(hashPassword(request.newPassword().trim()));
         user.setResetCodeHash(null);
         user.setResetCodeExpiresAt(null);
+        user.setResetCodeAttempts(0);
+        user.setTokenVersion(user.getTokenVersion() + 1);
         user.setLastLoginAt(Instant.now());
         User savedUser = userRepository.save(user);
+
+        mciAccessLogService.recordAccessEvent(savedUser.getId().toString(), "PASSWORD_RESET", httpRequest);
 
         UserProfile profile = userProfileRepository.findById(savedUser.getId())
             .orElseGet(() -> userProfileRepository.save(new UserProfile(savedUser.getId())));
 
-        String token = jwtService.generateToken(savedUser.getId(), savedUser.getEmail());
+        String token = jwtService.generateToken(savedUser);
         return toAuthResponse(savedUser, profile, token);
     }
 
     @Transactional
-    public void changePassword(UUID userId, AuthDto.ChangePasswordRequest request) {
-        if (request == null || request.newPassword() == null || request.newPassword().trim().length() < 6) {
-            throw new IllegalArgumentException("A nova senha deve ter pelo menos 6 caracteres.");
+    public void changePassword(UUID userId, AuthDto.ChangePasswordRequest request, HttpServletRequest httpRequest) {
+        if (request == null || request.newPassword() == null || request.newPassword().trim().length() < 8) {
+            throw new IllegalArgumentException("A nova senha deve ter pelo menos 8 caracteres.");
         }
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new InvalidCredentialsException("Sessão inválida."));
@@ -311,10 +389,20 @@ public class AuthService {
         user.setPasswordHash(hashPassword(request.newPassword().trim()));
         user.setResetCodeHash(null);
         user.setResetCodeExpiresAt(null);
+        user.setResetCodeAttempts(0);
+        user.setTokenVersion(user.getTokenVersion() + 1);
         userRepository.save(user);
+        mciAccessLogService.recordAccessEvent(userId.toString(), "PASSWORD_CHANGED", httpRequest);
     }
 
-    private void dispatchRecoveryEmailOrLog(String email, String name, String code) {
+    @Transactional
+    public void logoutSession(User user, HttpServletRequest httpRequest) {
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        userRepository.save(user);
+        mciAccessLogService.recordAccessEvent(user.getId().toString(), "LOGOUT", httpRequest);
+    }
+
+    private void dispatchRecoveryEmailOrWarn(String email, String name, String code) {
         String resendKey = appConfigService != null ? appConfigService.getResendApiKey() : "";
         if (resendKey.isBlank()) {
             resendKey = System.getenv("RESEND_API_KEY");
@@ -342,7 +430,7 @@ public class AuthService {
                 String jsonBody = new ObjectMapper().writeValueAsString(Map.of(
                     "from", fromAddress,
                     "to", List.of(email.trim()),
-                    "subject", "Seu código de acesso Forma: " + code,
+                    "subject", "Código de recuperação de senha — Forma",
                     "text", plainTextEmail,
                     "html", htmlEmail
                 ));
@@ -357,17 +445,17 @@ public class AuthService {
                     .build();
                 HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                    log.info("[Auth] E-mail de recuperação enviado via Resend para {} (HTTP {})", email, resp.statusCode());
+                    log.info("[Auth] E-mail de recuperação enviado via Resend (HTTP {}).", resp.statusCode());
                     return;
                 } else {
-                    log.warn("[Auth] Resend retornou HTTP {} para {}: {}", resp.statusCode(), email, resp.body());
+                    log.warn("[Auth] Resend retornou HTTP {} ao enviar recuperação.", resp.statusCode());
                 }
             } catch (Exception e) {
-                log.warn("[Auth] Falha ao enviar e-mail via Resend ({}), registrando no log local.", e.getMessage());
+                log.warn("[Auth] Falha ao enviar e-mail via Resend: {}", e.getMessage());
             }
+        } else {
+            log.warn("[Auth] RESEND_API_KEY ausente; código de recuperação gerado com sucesso sem exposição em log.");
         }
-
-        log.info("[Auth] Código de recuperação Forma gerado para {}: {} (válido por 15 min)", email, code);
     }
 
     private String buildStyledRecoveryEmailHtml(String userName, String code) {
@@ -405,7 +493,7 @@ public class AuthService {
                       </div></div>
                     </div>
                     <div class="gm-screen"><div class="gm-diff" style="color:#FFFFFF;">
-                      <div style="font-size:12px;line-height:1.5;color:#B0BEC5;margin-bottom:14px;">Válido por <strong>15 minutos</strong>.</div>
+                      <div style="font-size:12px;line-height:1.5;color:#B0BEC5;margin-bottom:14px;">Válido por <strong>15 minutos</strong> (máximo 5 tentativas).</div>
                       <div style="font-size:11px;line-height:1.45;color:#90A4AE;">Se você não solicitou esta alteração, basta ignorar esta mensagem.</div>
                     </div></div>
                   </div>
@@ -444,7 +532,6 @@ public class AuthService {
         if (password == null) return "";
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            // Compatibilidade com hashes legados até que o usuário realize login e migre para BCrypt
             byte[] hash = digest.digest(("forma_salt_" + password).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException e) {
@@ -469,6 +556,9 @@ public class AuthService {
             user.getName(),
             user.getAuthProvider(),
             user.getAccountTier(),
+            user.isAiConsentGranted(),
+            user.getHealthConsentAcceptedAt() != null,
+            user.isAgeConfirmed18Plus(),
             SyncDto.ProfileDto.fromEntity(profile)
         );
     }

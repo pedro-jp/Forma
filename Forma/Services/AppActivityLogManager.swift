@@ -157,7 +157,7 @@ public final class AppActivityLogManager: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(records) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        try? data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
     
     // MARK: - Registro de Eventos

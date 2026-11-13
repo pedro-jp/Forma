@@ -1,10 +1,13 @@
 package com.forma.backend.exception;
 
 import com.forma.backend.exception.DomainExceptions.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -12,6 +15,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(UnauthorizedAccessException.class)
     public ResponseEntity<Map<String, Object>> handleUnauthorized(UnauthorizedAccessException ex) {
@@ -40,9 +45,6 @@ public class GlobalExceptionHandler {
         if (ex.getEmail() != null) {
             extra.put("email", ex.getEmail());
         }
-        if (ex.getExistingName() != null) {
-            extra.put("existingName", ex.getExistingName());
-        }
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), extra);
     }
 
@@ -54,9 +56,23 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.FORBIDDEN, ex.getMessage(), Map.of("aiBlockedForUser", true));
     }
 
+    @ExceptionHandler(AiConsentRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleAiConsentRequired(AiConsentRequiredException ex) {
+        return buildResponse(
+            HttpStatus.FORBIDDEN,
+            ex.getMessage(),
+            Map.of("aiBlockedForUser", true, "aiConsentRequired", true)
+        );
+    }
+
     @ExceptionHandler(AiQuotaExceededException.class)
     public ResponseEntity<Map<String, Object>> handleAiQuotaExceeded(AiQuotaExceededException ex) {
         return buildResponse(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), Map.of("quotaExceeded", true));
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimit(RateLimitExceededException ex) {
+        return buildResponse(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), Map.of("rateLimited", true));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -79,12 +95,19 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), Map.of());
     }
 
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleResourceNotFound(NoResourceFoundException ex) {
+        return buildResponse(HttpStatus.NOT_FOUND, "Recurso ou endpoint não encontrado.", Map.of());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleUnexpected(Exception ex) {
-        String message = ex.getMessage() != null && !ex.getMessage().isBlank()
-            ? ex.getMessage()
-            : "Erro interno inesperado no servidor Forma.";
-        return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, message, Map.of());
+        log.error("[HTTP 500] Erro interno não tratado: {}", ex.getMessage(), ex);
+        return buildResponse(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "Erro interno inesperado no servidor Forma. Tente novamente em instantes.",
+            Map.of("internalError", true)
+        );
     }
 
     private ResponseEntity<Map<String, Object>> buildResponse(

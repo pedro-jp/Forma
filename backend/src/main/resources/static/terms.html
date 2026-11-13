@@ -3,27 +3,58 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Termos de Uso (EULA) & Aviso de Saúde — Forma</title>
+  <title>Termos de Uso (EULA) & Avisos de Saúde — Forma</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0f14;
-      --card: #131922;
-      --border: rgba(255, 255, 255, 0.09);
+      --bg: #090d14;
+      --surface: #111824;
+      --border: rgba(255, 255, 255, 0.1);
       --text: #f3f6fa;
-      --muted: #a3b1c2;
+      --muted: #a6b4c8;
       --accent: #32d79b;
+      --warn: #fbbf24;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at top left, rgba(50, 215, 155, 0.08), transparent 42%), var(--bg);
       color: var(--text);
-      line-height: 1.65;
-      padding: 32px 18px 64px;
+      line-height: 1.68;
     }
-    .container { max-width: 780px; margin: 0 auto; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(9, 13, 20, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 800;
+      font-size: 16px;
+      text-decoration: none;
+    }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+    .nav a { color: var(--muted); text-decoration: none; }
+    .nav a:hover, .nav a.active { color: var(--accent); }
+    .container { max-width: 900px; margin: 0 auto; padding: 34px 20px 72px; }
     .badge {
       display: inline-block;
       padding: 5px 12px;
@@ -34,68 +65,101 @@
       font-weight: 700;
       margin-bottom: 12px;
     }
-    h1 { margin: 0 0 8px; font-size: 28px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: -0.02em; }
     h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
-    p, li { color: var(--muted); font-size: 15px; }
+    p, li { color: var(--muted); font-size: 14.5px; }
     a { color: var(--accent); text-decoration: underline; }
     .card {
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 18px;
-      padding: 22px;
-      margin-top: 18px;
+      padding: 24px;
+      margin-top: 20px;
+    }
+    .alert {
+      background: rgba(251, 191, 36, 0.08);
+      border: 1px solid rgba(251, 191, 36, 0.28);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 12px;
+      font-size: 14px;
+      color: #fde68a;
     }
     ul { padding-left: 20px; margin: 8px 0 0; }
+    li + li { margin-top: 6px; }
     strong { color: var(--text); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <span class="badge">Forma • Termos de Uso & EULA</span>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <img src="/logo.png" alt="Logo Forma" onerror="this.style.display='none'" />
+        <span>Forma</span>
+      </a>
+      <nav class="nav" aria-label="Navegação Principal">
+        <a href="/">Início</a>
+        <a href="/docs">Documentação</a>
+        <a href="/privacy">Privacidade & LGPD</a>
+        <a href="/terms" class="active">Termos de Uso</a>
+        <a href="/admin/">Console Admin</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <span class="badge">Versão 2026.11-LGPD • Termos de Uso, EULA &amp; Regulação de Saúde</span>
     <h1>Termos de Uso e Condições Gerais</h1>
-    <p>Última atualização: Novembro de 2026 • <a href="/privacy.html">Ler Política de Privacidade (LGPD)</a></p>
+    <p>Estes Termos regem o uso do aplicativo <strong>Forma</strong> (iOS, watchOS e Widgets) e dos serviços web associados, em harmonia com o <strong>Código de Defesa do Consumidor (Lei nº 8.078/1990)</strong>, a <strong>LGPD (Lei nº 13.709/2018)</strong> e o <strong>Marco Civil da Internet (Lei nº 12.965/2014)</strong>.</p>
 
-    <div class="card">
-      <h2>1. Aceitação dos Termos</h2>
-      <p>Ao criar uma conta ou utilizar o aplicativo <strong>Forma</strong>, você declara ter pelo menos 16 anos (ou autorização de seu responsável legal) e concorda integralmente com estes Termos de Uso e com a nossa <a href="/privacy.html">Política de Privacidade</a>.</p>
-    </div>
+    <section class="card">
+      <h2>1. Elegibilidade (Maiores de 18 Anos) e Aceitação</h2>
+      <p>Ao criar uma conta no Forma, você declara expressamente ter <strong>18 (dezoito) anos completos ou mais</strong>, capacidade civil plena e concordância com estes Termos e com a <a href="/privacy">Política de Privacidade</a>. O consentimento para tratamento de dados sensíveis de bem-estar (Art. 11 LGPD) é colhido de forma destacada no cadastro; o compartilhamento com IA em nuvem é opcional e separado.</p>
+    </section>
 
-    <div class="card">
-      <h2>2. Natureza Informativa — Isenção de Ato Médico ou Prescrição</h2>
-      <p>O Forma é uma ferramenta de organização pessoal de rotina alimentar, hidratação e exercícios físicos. Todas as metas calóricas, divisões de macronutrientes, cálculos de IMC/TMB e sugestões geradas possuem <strong>caráter exclusivamente informativo e educacional</strong>.</p>
+    <section class="card">
+      <h2>2. Natureza Educacional e Restrições Regulatórias (CFN, CONFEF e CFM)</h2>
+      <p>O Forma é uma ferramenta digital de organização pessoal de rotina alimentar, hidratação e atividades físicas. Todas as metas, cálculos de Taxa Metabólica Basal (Mifflin-St Jeor), composição de alimentos (Tabela TACO — NEPA/UNICAMP), estimativas calóricas por METs e textos gerados possuem caráter <strong>exclusivamente informativo e educacional</strong>.</p>
       <ul>
-        <li>O aplicativo <strong>não realiza diagnóstico médico ou nutricional</strong>, não prescreve tratamentos e não substitui consultas com médico, nutricionista (CFN) ou profissional de educação física (CONFEF/CREF).</li>
-        <li>Consulte sempre um profissional de saúde qualificado antes de iniciar dietas restritivas, suplementação ou programas intensos de exercícios, especialmente se possuir condições clínicas pré-existentes, gestação ou histórico de transtornos alimentares.</li>
+        <li><strong>Ausência de ato privativo profissional:</strong> O aplicativo <strong>não realiza diagnóstico médico ou clínico</strong> (CFM), <strong>não prescreve dietas terapêuticas ou planos alimentares individualizados</strong> (CFN / Lei nº 8.234/1991) e <strong>não prescreve cargas ou programas clínicos de treinamento físico</strong> (CONFEF/CREF).</li>
+        <li><strong>Travas fisiológicas obrigatórias:</strong> Tanto no aplicativo quanto no servidor backend, metas diárias geradas ou sugeridas respeitam piso calórico seguro mínimo de <strong>1.200 kcal/dia</strong>, proteção contra metas correspondentes a <strong>IMC abaixo de 18,5 kg/m²</strong> e remoção automática de prescrições de carga absoluta em cenários com menção a dor, lesão ou condição clínica, com recomendação expressa de avaliação por médico, nutricionista (CRN) ou profissional de educação física (CREF).</li>
       </ul>
-    </div>
+      <div class="alert">
+        Em caso de dor aguda, doença crônica, gravidez, histórico de transtorno alimentar ou uso de medicação contínua, procure atendimento presencial com profissional de saúde habilitado antes de alterar dieta ou rotina de exercícios.
+      </div>
+    </section>
 
-    <div class="card">
-      <h2>3. Recursos com Inteligência Artificial (Google Gemini)</h2>
-      <p>O Forma integra recursos opcionais baseados na inteligência artificial <strong>Google Gemini (Google LLC)</strong> para reconhecimento de pratos por foto, interpretação de texto/voz e análises de progresso.</p>
+    <section class="card">
+      <h2>3. Camadas de Uso (Essencial Free vs. Forma Pro) e Recursos de IA</h2>
       <ul>
-        <li>Estimativas geradas por IA podem apresentar variações em relação ao peso real das porções ou modo de preparo; você pode revisar e ajustar manualmente qualquer alimento, porção ou treino antes de salvar.</li>
-        <li>O uso da IA na nuvem depende do seu consentimento explícito e pode ser desativado a qualquer momento nas configurações do perfil.</li>
+        <li><strong>Camada Essencial (Free):</strong> Oferece registro manual, consulta completa à Tabela TACO offline, metas hidratação/peso/treinos com catálogo 3D, Widgets, Ilha Dinâmica e cálculos fisiológicos determinísticos locais, sem uso da nuvem de IA generativa.</li>
+        <li><strong>Camada Forma Pro:</strong> Habilita recursos com <strong>Google Gemini (Google LLC)</strong> — reconhecimento por foto do prato, texto/voz inteligente, geração de sugestão inicial assistida e análise educacional de evolução — mediante consentimento específico opt-in do usuário e sujeito às travas fisiológicas e limites diários antiabuso.</li>
+        <li>As estimativas geradas por IA são aproximadas; cabe ao usuário revisar porções, ingredientes e execução segura antes de registrar ou adotar qualquer sugestão.</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>4. Conta, Uso Adequado e Encerramento</h2>
-      <p>Você é responsável por manter a confidencialidade de suas credenciais de acesso. É vedado utilizar o serviço para fins ilícitos, engenharia reversa ou sobrecarga automatizada da API. Você pode encerrar e excluir permanentemente sua conta e todos os seus dados a qualquer momento em <strong>Perfil &gt; Conta &gt; Excluir Minha Conta</strong>.</p>
-    </div>
-
-    <div class="card">
-      <h2>5. Planos, Assinaturas e Direito de Arrependimento (CDC Art. 49)</h2>
-      <p>Caso contrate recursos pagos ou assinaturas no futuro:</p>
+    <section class="card">
+      <h2>4. Segurança da Conta, Uso Aceitável e Encerramento</h2>
       <ul>
-        <li>As condições de preço, periodicidade de renovação automática e forma de cancelamento serão apresentadas de forma clara antes da confirmação da compra.</li>
-        <li>Em conformidade com o <strong>Art. 49 do Código de Defesa do Consumidor (Lei nº 8.078/1990)</strong>, é assegurado o direito de arrependimento no prazo de 7 (sete) dias corridos a contar da contratação inicial, pelos canais oficiais da plataforma onde a assinatura foi realizada (App Store da Apple em <a href="https://reportaproblem.apple.com" target="_blank" rel="noopener">reportaproblem.apple.com</a> ou suporte oficial do Forma).</li>
+        <li>A senha cadastrada deve conter no mínimo <strong>8 caracteres</strong>. Múltiplas tentativas inválidas de código OTP de recuperação aplicam bloqueio progressivo por segurança.</li>
+        <li>É proibido realizar engenharia reversa, contornar controles de taxa (rate limiting), tentar acessar dados de terceiros ou enviar conteúdo ilícito à API.</li>
+        <li>Você pode encerrar e excluir permanentemente sua conta a qualquer momento em <strong>Perfil &gt; Conta &gt; Excluir Minha Conta</strong>, bem como exportar seus dados em formato JSON em <strong>Perfil &gt; Privacidade, Saúde &amp; Termos</strong>.</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>6. Contato, Suporte e Foro</h2>
-      <p>Dúvidas, solicitações LGPD ou relatos sobre estimativas da IA podem ser enviados para <a href="mailto:joaopedroc035@gmail.com">joaopedroc035@gmail.com</a>. Estes Termos são regidos pelas leis da República Federativa do Brasil.</p>
-    </div>
-  </div>
+    <section class="card">
+      <h2>5. Relações de Consumo (CDC) e Licença Apple App Store (EULA)</h2>
+      <ul>
+        <li><strong>Direito de arrependimento (Art. 49 CDC):</strong> Caso futuramente haja assinatura paga, garante-se o arrependimento em até 7 dias corridos da contratação inicial, com reembolso integral pelos canais oficiais da loja (<a href="https://reportaproblem.apple.com" target="_blank" rel="noopener">reportaproblem.apple.com</a>) ou suporte Forma.</li>
+        <li><strong>Cláusulas protetivas do consumidor (Art. 51 CDC):</strong> Nenhuma disposição destes Termos exclui responsabilidade legal inderrogável do fornecedor por defeito de serviço ou falha de segurança prevista em lei.</li>
+        <li><strong>Beneficiária de terceiros (Apple Inc.):</strong> A licença do aplicativo iOS é intransferível e restrita a dispositivos Apple sob os Termos de Mídia da Apple; a manutenção e suporte do app cabem ao desenvolvedor Forma, sendo a Apple Inc. terceira beneficiária autorizada a fazer cumprir esta licença quanto ao aplicativo iOS.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>6. Contato, Suporte e Foro Competente</h2>
+      <p>Solicitações contratuais ou de privacidade devem ser encaminhadas para <a href="mailto:privacidade@forma.app">privacidade@forma.app</a> ou <a href="mailto:joaopedroc035@gmail.com">joaopedroc035@gmail.com</a>. Estes Termos são regidos pelas leis da República Federativa do Brasil, ficando ressalvado em qualquer litígio o <strong>foro do domicílio do consumidor no Brasil</strong>, nos termos do Art. 101, I do Código de Defesa do Consumidor.</p>
+    </section>
+  </main>
 </body>
 </html>

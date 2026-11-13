@@ -202,13 +202,27 @@ class AdminUserControlIntegrationTest {
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.aiBlockedForUser").value(true));
 
-        // 4. Liberar IA individual mas impor cota diária de 2 requisições -> 429 quotaExceeded quando atingir 2 usos hoje
+        // 4. Exigir consentimento explícito de IA (403 aiConsentRequired) antes de aceitar cota diária (429 quotaExceeded)
         mockMvc.perform(post("/api/admin/users/" + user.userId() + "/ai-access")
                 .cookie(adminCookie)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new AdminDto.UserAiAccessRequest(false, 2))))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.dailyAiLimit").value(2));
+
+        mockMvc.perform(post("/api/ai/analyze-workout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"description\":\"Agachamento 4x8\",\"userWeight\":75.0,\"userName\":\"Atleta\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.aiConsentRequired").value(true));
+
+        mockMvc.perform(post("/api/privacy/consents")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aiConsentGranted\":true,\"termsAccepted\":true,\"documentVersion\":\"2026-11-v2\",\"sensitiveHealthConsentGranted\":true,\"ageConfirmed18Plus\":true}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aiConsentGranted").value(true));
 
         aiRequestLogRepository.save(new AiRequestLogEntity(user.userId(), "/api/ai/analyze-meal", "Refeição 1", "SUCCESS", 350L));
         aiRequestLogRepository.save(new AiRequestLogEntity(user.userId(), "/api/ai/analyze-meal", "Refeição 2", "SUCCESS", 410L));

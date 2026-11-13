@@ -34,7 +34,10 @@ struct LoginView: View {
     @State private var isGoogleAuthenticating: Bool = false
     @State private var showExistingAccountAlert: Bool = false
     @State private var pendingSocialSignIn: PendingSocialSignIn? = nil
-    @State private var acceptedTermsAndLGPD: Bool = false
+    @State private var acceptedAge18Plus: Bool = false
+    @State private var acceptedTermsAndPrivacy: Bool = false
+    @State private var acceptedSensitiveHealthData: Bool = false
+    @State private var acceptedOptionalAISharing: Bool = false
 
     private struct PendingSocialSignIn {
         let provider: String
@@ -146,11 +149,11 @@ struct LoginView: View {
                                 .frame(width: 20)
                             Group {
                                 if isPasswordVisible {
-                                    TextField("Senha", text: $passwordText)
+                                    TextField(isRegisterMode ? "Senha (mín. 8 caracteres)" : "Senha", text: $passwordText)
                                         .textInputAutocapitalization(.never)
                                         .autocorrectionDisabled()
                                 } else {
-                                    SecureField("Senha", text: $passwordText)
+                                    SecureField(isRegisterMode ? "Senha (mín. 8 caracteres)" : "Senha", text: $passwordText)
                                 }
                             }
                             .textContentType(isRegisterMode ? .newPassword : .password)
@@ -188,33 +191,32 @@ struct LoginView: View {
                                 }
                             }
                         } else {
-                            HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                lgpdConsentCheckbox(
+                                    isChecked: $acceptedAge18Plus,
+                                    text: "Confirmo ter 18 anos ou mais (LGPD Art. 14)."
+                                )
+                                lgpdConsentCheckbox(
+                                    isChecked: $acceptedTermsAndPrivacy,
+                                    text: "Li e aceito os Termos de Uso e a Política de Privacidade."
+                                )
+                                lgpdConsentCheckbox(
+                                    isChecked: $acceptedSensitiveHealthData,
+                                    text: "Autorizo o tratamento dos meus dados de saúde e biometria (LGPD Art. 11) exclusivamente para o app."
+                                )
+                                lgpdConsentCheckbox(
+                                    isChecked: $acceptedOptionalAISharing,
+                                    text: "(Opcional) Autorizo enviar descrições/fotos (sem nome ou EXIF) ao Google Gemini (Google LLC) para IA."
+                                )
                                 Button {
-                                    acceptedTermsAndLGPD.toggle()
+                                    showLegalPrivacySheet = true
                                 } label: {
-                                    Image(systemName: acceptedTermsAndLGPD ? "checkmark.square.fill" : "square")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(acceptedTermsAndLGPD ? Color("AccentColor") : .secondary)
+                                    Text("Ler Política, Termos (EULA) e Aviso de Saúde")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Color("AccentColor"))
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.top, 1)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Li e aceito a Política de Privacidade (LGPD), os Termos de Uso e o tratamento dos meus dados de bem-estar.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .onTapGesture {
-                                            acceptedTermsAndLGPD.toggle()
-                                        }
-                                    Button {
-                                        showLegalPrivacySheet = true
-                                    } label: {
-                                        Text("Ler Política, Termos (EULA) e Aviso de Saúde")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(Color("AccentColor"))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                                .padding(.top, 2)
                             }
                             .padding(.horizontal, 4)
                             .padding(.top, 2)
@@ -360,16 +362,60 @@ struct LoginView: View {
     }
     
     // MARK: - Tratamento de Ações
+    @ViewBuilder
+    private func lgpdConsentCheckbox(isChecked: Binding<Bool>, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                isChecked.wrappedValue.toggle()
+            } label: {
+                Image(systemName: isChecked.wrappedValue ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(isChecked.wrappedValue ? Color("AccentColor") : .secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .onTapGesture {
+                    isChecked.wrappedValue.toggle()
+                }
+        }
+    }
+
     private func handleEmailAuth() {
         localErrorMessage = nil
-        if isRegisterMode && !acceptedTermsAndLGPD {
-            localErrorMessage = "Marque o aceite da Política de Privacidade (LGPD) e dos Termos de Uso para criar sua conta."
-            return
+        if isRegisterMode {
+            guard acceptedAge18Plus else {
+                localErrorMessage = "Confirme que você possui 18 anos ou mais para criar sua conta (LGPD Art. 14)."
+                return
+            }
+            guard acceptedTermsAndPrivacy else {
+                localErrorMessage = "Aceite os Termos de Uso e a Política de Privacidade para continuar."
+                return
+            }
+            guard acceptedSensitiveHealthData else {
+                localErrorMessage = "Autorize o tratamento de dados de saúde e biometria (LGPD Art. 11) para criar sua conta."
+                return
+            }
         }
         Task {
             do {
                 if isRegisterMode {
-                    try await authManager.register(name: nameText, email: emailText, password: passwordText)
+                    try await authManager.register(
+                        name: nameText,
+                        email: emailText,
+                        password: passwordText,
+                        termsAccepted: acceptedTermsAndPrivacy,
+                        sensitiveHealthConsentGranted: acceptedSensitiveHealthData,
+                        aiConsentGranted: acceptedOptionalAISharing,
+                        ageConfirmed18Plus: acceptedAge18Plus
+                    )
+                    if acceptedOptionalAISharing {
+                        AIDataConsentManager.shared.setLocalCacheOnly(true)
+                    }
                 } else {
                     try await authManager.login(email: emailText, password: passwordText)
                 }

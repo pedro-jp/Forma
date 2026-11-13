@@ -27,42 +27,37 @@ public class AiProxyController {
     @PostMapping(value = "/analyze-meal", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> analyzeMeal(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody AiDto.MealAiRequest request
     ) {
-        UUID userId = authContextResolver.validateAiAccess(authHeader, fallbackUserId);
+        UUID userId = authContextResolver.validateAiAccess(authHeader);
         return ResponseEntity.ok(geminiAiProxyService.analyzeMeal(userId, request));
     }
 
     @PostMapping(value = "/analyze-workout", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> analyzeWorkout(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody AiDto.WorkoutAiRequest request
     ) {
-        UUID userId = authContextResolver.validateAiAccess(authHeader, fallbackUserId);
+        UUID userId = authContextResolver.validateAiAccess(authHeader);
         return ResponseEntity.ok(geminiAiProxyService.analyzeWorkout(userId, request));
     }
 
     @PostMapping(value = "/analyze-evolution", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> analyzeEvolution(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody AiDto.EvolutionAiRequest request
     ) {
-        UUID userId = authContextResolver.validateAiAccess(authHeader, fallbackUserId);
+        UUID userId = authContextResolver.validateAiAccess(authHeader);
         return ResponseEntity.ok(geminiAiProxyService.analyzeEvolution(userId, request));
     }
 
     @PostMapping(value = "/suggest-initial-goals", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> suggestInitialGoals(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestHeader(value = "X-User-Id", required = false) String fallbackUserId,
         @RequestBody AiDto.InitialGoalsAiRequest request
     ) {
-        // Permite cálculo de metas iniciais mesmo se a chave da IA estiver indisponível (fallback fisiológico integrado)
-        var user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
-        boolean allowCloudAi = user.isPro() && !user.isAiBlocked();
+        var user = authContextResolver.requireActiveUser(authHeader);
+        boolean allowCloudAi = user.isPro() && !user.isAiBlocked() && user.isAiConsentGranted();
         return ResponseEntity.ok(geminiAiProxyService.suggestInitialGoals(user.getId(), request, allowCloudAi));
     }
 }

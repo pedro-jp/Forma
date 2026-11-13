@@ -2,10 +2,12 @@ package com.forma.backend.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forma.backend.entity.User;
+import com.forma.backend.repository.DeletedAccountTombstoneRepository;
 import com.forma.backend.repository.UserRepository;
 import com.forma.backend.service.JwtService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -33,12 +35,23 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final DeletedAccountTombstoneRepository tombstoneRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<UUID, Set<WebSocketSession>> sessionsByUserId = new ConcurrentHashMap<>();
 
     public UserAccountWebSocketHandler(JwtService jwtService, UserRepository userRepository) {
+        this(jwtService, userRepository, null);
+    }
+
+    @Autowired
+    public UserAccountWebSocketHandler(
+        JwtService jwtService,
+        UserRepository userRepository,
+        DeletedAccountTombstoneRepository tombstoneRepository
+    ) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.tombstoneRepository = tombstoneRepository;
     }
 
     @Override
@@ -50,21 +63,25 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
         }
 
         UUID tokenUserId;
+        int tokenVersion;
         try {
             tokenUserId = jwtService.getUserIdFromToken(token);
+            tokenVersion = jwtService.extractTokenVersion(token);
         } catch (Exception e) {
             closeQuietly(session, CloseStatus.POLICY_VIOLATION);
             return;
         }
 
-        Optional<User> userOpt = userRepository.findById(tokenUserId);
-        if (userOpt.isEmpty()) {
-            String email = jwtService.getEmailFromToken(token);
-            if (email != null && !email.isBlank()) {
-                userOpt = userRepository.findByEmail(email.trim().toLowerCase());
-            }
+        if (tombstoneRepository != null && tombstoneRepository.existsById(tokenUserId.toString())) {
+            sendDirectJson(session, Map.of(
+                "type", "ACCOUNT_DELETED",
+                "timestamp", Instant.now().toString()
+            ));
+            closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+            return;
         }
 
+        Optional<User> userOpt = userRepository.findById(tokenUserId);
         if (userOpt.isEmpty()) {
             sendDirectJson(session, Map.of(
                 "type", "ACCOUNT_DELETED",
@@ -75,6 +92,11 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
         }
 
         User user = userOpt.get();
+        if (user.getTokenVersion() != tokenVersion) {
+            closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+            return;
+        }
+
         UUID effectiveUserId = user.getId();
         session.getAttributes().put(ATTR_USER_ID, effectiveUserId);
         sessionsByUserId
@@ -157,6 +179,15 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    public void disconnectUser(UUID userId) {
+        if (userId == null) return;
+        Set<WebSocketSession> sessions = sessionsByUserId.remove(userId);
+        if (sessions == null || sessions.isEmpty()) return;
+        for (WebSocketSession session : sessions) {
+            closeQuietly(session, CloseStatus.NORMAL);
+        }
+    }
+
     private Map<String, Object> buildStatePayload(User user, String eventName) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("type", "ACCOUNT_STATE");
@@ -166,6 +197,7 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
         payload.put("status", user.getStatus() != null ? user.getStatus() : "ACTIVE");
         payload.put("pausedReason", user.getPausedReason() != null ? user.getPausedReason() : "");
         payload.put("aiBlocked", user.isAiBlocked());
+        payload.put("aiConsentGranted", user.isAiConsentGranted());
         payload.put("timestamp", Instant.now().toString());
         return payload;
     }

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forma — Ecossistema Seguro de Nutrição, Hidratação e Treinos</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080c12;
+      --surface: #111824;
+      --surface-alt: #161f2f;
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #f3f6fa;
+      --muted: #a6b4c8;
+      --accent: #32d79b;
+      --accent-dark: #06281c;
+      --info: #60a5fa;
+      --violet: #a78bfa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(ellipse at 80% 0%, rgba(50, 215, 155, 0.14), transparent 50%),
+        radial-gradient(ellipse at 10% 25%, rgba(96, 165, 250, 0.1), transparent 45%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.62;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgba(8, 12, 18, 0.88);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 800;
+      font-size: 17px;
+      text-decoration: none;
+    }
+    .brand img { width: 32px; height: 32px; border-radius: 9px; }
+    .nav { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; }
+    .nav a { color: var(--muted); text-decoration: none; }
+    .nav a:hover, .nav a.active { color: var(--accent); }
+    .btn-admin {
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: rgba(50, 215, 155, 0.14);
+      border: 1px solid rgba(50, 215, 155, 0.35);
+      color: var(--accent) !important;
+    }
+    .container { max-width: 1120px; margin: 0 auto; padding: 48px 20px 80px; }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr 0.95fr;
+      gap: 32px;
+      align-items: center;
+      margin-bottom: 52px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 13px;
+      border-radius: 999px;
+      background: rgba(50, 215, 155, 0.13);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+    }
+    .status-dot.ok { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(30px, 4vw, 44px);
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+    }
+    .lead { color: var(--muted); font-size: 16.5px; margin: 0 0 24px; }
+    .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .btn-primary { background: var(--accent); color: var(--accent-dark); }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .trust-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 24px;
+    }
+    .trust-panel h2 { margin: 0 0 14px; font-size: 17px; color: var(--text); }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .metric {
+      background: var(--surface-alt);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .metric-val { font-size: 17px; font-weight: 800; color: var(--accent); }
+    .metric-lbl { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .section-title { font-size: 22px; margin: 0 0 18px; letter-spacing: -0.015em; }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-bottom: 44px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 16.5px; color: var(--text); }
+    .card p { margin: 0; font-size: 14px; color: var(--muted); }
+    .card a { color: var(--accent); font-size: 13.5px; font-weight: 600; display: inline-block; margin-top: 12px; text-decoration: none; }
+    .footer {
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .footer a { color: var(--accent); text-decoration: none; margin-left: 14px; }
+    @media (max-width: 860px) {
+      .hero { grid-template-columns: 1fr; }
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <img src="/logo.png" alt="Logo Forma" onerror="this.style.display='none'" />
+        <span>Forma</span>
+      </a>
+      <nav class="nav" aria-label="Navegação Principal">
+        <a href="/" class="active">Início</a>
+        <a href="/docs">Documentação Completa</a>
+        <a href="/privacy">Privacidade & LGPD</a>
+        <a href="/terms">Termos & Avisos</a>
+        <a href="/admin/" class="btn-admin">Console Admin</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div>
+        <span class="pill">
+          <span class="status-dot" id="apiDot"></span>
+          <span id="apiStatusText">Verificando status da API...</span>
+        </span>
+        <h1>Nutrição, Hidratação e Treinos com Arquitetura Blindada e LGPD by Design.</h1>
+        <p class="lead">O ecossistema <strong>Forma</strong> reúne aplicativo nativo iOS/watchOS, Live Activities na Ilha Dinâmica, sincronização criptografada em nuvem (Spring Boot + PostgreSQL RLS) e IA opcional com consentimento auditável.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="/docs">Explorar Documentação Técnica</a>
+          <a class="btn btn-secondary" href="/privacy">Central LGPD &amp; Privacidade</a>
+        </div>
+      </div>
+
+      <aside class="trust-panel" aria-label="Garantias de Segurança e Compliance">
+        <h2>Trust Center &amp; Segurança</h2>
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="metric-val">AES-256-GCM</div>
+            <div class="metric-lbl">Criptografia em repouso de tokens OAuth, IPs MCI e segredos de API</div>
+          </div>
+          <div class="metric">
+            <div class="metric-val">RLS 100%</div>
+            <div class="metric-lbl">Row-Level Security e isolamento estrito por <code>user_id</code> no Supabase</div>
+          </div>
+          <div class="metric">
+            <div class="metric-val">Opt-In Granular</div>
+            <div class="metric-lbl">Ledger imutável SHA-256 sem envio silencioso de dados para IA</div>
+          </div>
+          <div class="metric">
+            <div class="metric-val">180 Dias MCI</div>
+            <div class="metric-lbl">Guarda cifrada Art. 15 Lei 12.965/2014 com expurgo diário automático</div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <h2 class="section-title">Pilares do Sistema &amp; Compliance</h2>
+    <section class="grid-3">
+      <article class="card">
+        <h3>Arquitetura &amp; API Documentadas</h3>
+        <p>Especificação completa das rotas REST/WebSocket, esquema de 16 tabelas PostgreSQL, diagramas de fluxo e guia de variáveis de produção.</p>
+        <a href="/docs">Abrir /docs →</a>
+      </article>
+      <article class="card">
+        <h3>Governança LGPD, ANPD &amp; Portabilidade</h3>
+        <p>Consentimento destacado Art. 11, minimização de PII e remoção de EXIF antes da IA, exportação JSON (Art. 18 V) e exclusão com tombstone anti-ressurreição.</p>
+        <a href="/privacy">Abrir /privacy →</a>
+      </article>
+      <article class="card">
+        <h3>Travas CFN, CONFEF, CFM &amp; CDC</h3>
+        <p>Restrição etária 18+, caráter exclusivamente educacional, piso seguro de 1.200 kcal/dia, proteção IMC ≥ 18,5 e remoção de carga absoluta em lesões.</p>
+        <a href="/terms">Abrir /terms →</a>
+      </article>
+    </section>
+
+    <footer class="footer">
+      <span>Forma © 2026 • Contato DPO: <a href="mailto:privacidade@forma.app" style="margin-left:4px;">privacidade@forma.app</a></span>
+      <div>
+        <a href="/docs">Documentação</a>
+        <a href="/privacy">Privacidade</a>
+        <a href="/terms">Termos</a>
+        <a href="/api/health">Health API</a>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    (function checkHealth() {
+      var dot = document.getElementById('apiDot');
+      var txt = document.getElementById('apiStatusText');
+      fetch('/api/health', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.status === 'ok') {
+            dot.classList.add('ok');
+            txt.textContent = 'API Forma Operacional • TLS & Headers Ativos';
+          } else {
+            txt.textContent = 'API Forma em verificação';
+          }
+        })
+        .catch(function () {
+          txt.textContent = 'Status da API indisponível no momento';
+        });
+    })();
+  </script>
+</body>
+</html>

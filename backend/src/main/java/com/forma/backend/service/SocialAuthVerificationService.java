@@ -2,10 +2,12 @@ package com.forma.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forma.backend.exception.DomainExceptions.InvalidCredentialsException;
 import io.jsonwebtoken.Jwts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigInteger;
@@ -41,7 +43,6 @@ public class SocialAuthVerificationService {
     private static final String GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
     private static final String DEFAULT_GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
     private static final String APPLE_ISSUER = "https://appleid.apple.com";
-    private static final String APP_BUNDLE_ID = "jota.Forma";
 
     private volatile String appleTokenUrl = DEFAULT_APPLE_TOKEN_URL;
     private volatile String appleRevokeUrl = DEFAULT_APPLE_REVOKE_URL;
@@ -56,8 +57,10 @@ public class SocialAuthVerificationService {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AppConfigService appConfigService;
+    private final boolean allowDevSocialMock;
+    private final String appleBundleId;
+    private final String googleClientId;
 
-    // Cache de chaves públicas por Key ID (KID)
     private final Map<String, PublicKey> appleKeysCache = new ConcurrentHashMap<>();
     private final Map<String, PublicKey> googleKeysCache = new ConcurrentHashMap<>();
     private Instant lastAppleCacheRefresh = Instant.EPOCH;
@@ -67,25 +70,38 @@ public class SocialAuthVerificationService {
         String sub,
         String email,
         String name,
-        String provider
-    ) {}
+        String provider,
+        boolean emailVerified
+    ) {
+        public VerifiedSocialUser(String sub, String email, String name, String provider) {
+            this(sub, email, name, provider, true);
+        }
+    }
 
     public SocialAuthVerificationService() {
-        this(null);
+        this(null, false, "jota.Forma", "");
     }
 
     @Autowired
-    public SocialAuthVerificationService(AppConfigService appConfigService) {
+    public SocialAuthVerificationService(
+        AppConfigService appConfigService,
+        @Value("${app.auth.allow-dev-social-mock:false}") boolean allowDevSocialMock,
+        @Value("${app.auth.apple-bundle-id:jota.Forma}") String appleBundleId,
+        @Value("${app.google.client-id:}") String googleClientId
+    ) {
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
         this.objectMapper = new ObjectMapper();
         this.appConfigService = appConfigService;
+        this.allowDevSocialMock = allowDevSocialMock;
+        this.appleBundleId = (appleBundleId != null && !appleBundleId.isBlank()) ? appleBundleId.trim() : "jota.Forma";
+        this.googleClientId = googleClientId != null ? googleClientId.trim() : "";
     }
 
     public VerifiedSocialUser verifyToken(String provider, String idToken, String rawNonce, String fallbackName) {
         if (idToken == null || idToken.isBlank()) {
-            throw new IllegalArgumentException("Token de autenticação social ausente.");
+            throw new InvalidCredentialsException("Token de autenticação social ausente.");
         }
 
         String p = provider != null ? provider.toUpperCase().trim() : "APPLE";
@@ -99,42 +115,37 @@ public class SocialAuthVerificationService {
         }
     }
 
-    // ==========================================
-    // 1. VALIDAÇÃO REAL SIGN IN WITH APPLE
-    // ==========================================
     private VerifiedSocialUser verifyAppleToken(String idToken, String rawNonce, String fallbackName) {
-        // Suporte a mock de desenvolvimento seguro em simuladores offline
         if (!idToken.contains(".") || idToken.startsWith("apple_identity_token")) {
-            log.warn("[Apple Auth] Token de desenvolvimento detectado no simulador.");
-            return new VerifiedSocialUser("apple_sim_" + System.currentTimeMillis(), null, fallbackName, "APPLE");
+            if (!allowDevSocialMock) {
+                throw new InvalidCredentialsException("Identity Token Apple inválido ou não aceito neste ambiente.");
+            }
+            log.warn("[Apple Auth] Token simulado aceito exclusivamente em perfil de teste.");
+            return new VerifiedSocialUser("apple_sim_test", null, fallbackName, "APPLE", true);
         }
 
         String[] parts = idToken.split("\\.");
         if (parts.length != 3) {
-            throw new IllegalArgumentException("Formato inválido do Identity Token da Apple.");
+            throw new InvalidCredentialsException("Formato inválido do Identity Token da Apple.");
         }
 
         try {
-            // 1. Decodifica Header para obter o 'kid'
             byte[] headerBytes = Base64.getUrlDecoder().decode(parts[0]);
             JsonNode headerNode = objectMapper.readTree(headerBytes);
             String kid = headerNode.path("kid").asText();
             if (kid == null || kid.isBlank()) {
-                throw new IllegalArgumentException("Header do token Apple sem Key ID (kid).");
+                throw new InvalidCredentialsException("Header do token Apple sem Key ID (kid).");
             }
 
-            // 2. Obtém chave pública da Apple
             PublicKey publicKey = getApplePublicKey(kid);
             if (publicKey == null) {
-                // Tenta recarregar o cache da Apple caso seja uma chave recém-rotacionada
                 refreshAppleKeys();
                 publicKey = appleKeysCache.get(kid);
                 if (publicKey == null) {
-                    throw new IllegalArgumentException("Chave pública da Apple não encontrada para kid: " + kid);
+                    throw new InvalidCredentialsException("Chave pública da Apple não encontrada para kid: " + kid);
                 }
             }
 
-            // 3. Valida assinatura criptográfica RSA-SHA256
             byte[] signedContent = (parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8);
             byte[] signatureBytes = Base64.getUrlDecoder().decode(parts[2]);
 
@@ -143,73 +154,68 @@ public class SocialAuthVerificationService {
             verifier.update(signedContent);
 
             if (!verifier.verify(signatureBytes)) {
-                throw new IllegalArgumentException("Assinatura criptográfica do token da Apple INVÁLIDA.");
+                throw new InvalidCredentialsException("Assinatura criptográfica do token da Apple INVÁLIDA.");
             }
 
-            // 4. Valida Claims do Payload
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
             JsonNode payload = objectMapper.readTree(payloadBytes);
 
             String iss = payload.path("iss").asText();
             if (!APPLE_ISSUER.equals(iss)) {
-                throw new IllegalArgumentException("Emissor inválido no token Apple: " + iss);
+                throw new InvalidCredentialsException("Emissor inválido no token Apple.");
             }
 
-            // Validação de Audience (aud = Bundle ID do app iOS jota.Forma)
-            String aud = payload.path("aud").asText();
-            if (aud != null && !aud.isBlank() && !APP_BUNDLE_ID.equals(aud) && !aud.contains("Forma")) {
-                log.warn("[Apple Auth] Audience inesperado no token: {}", aud);
+            if (!audienceMatches(payload.get("aud"), appleBundleId)) {
+                throw new InvalidCredentialsException("Audience inválido no token Apple.");
             }
 
             long exp = payload.path("exp").asLong(0);
-            if (exp > 0 && Instant.now().getEpochSecond() > exp) {
-                throw new IllegalArgumentException("Token da Apple expirado.");
+            if (exp <= 0 || Instant.now().getEpochSecond() > exp) {
+                throw new InvalidCredentialsException("Token da Apple expirado.");
             }
 
-            // 5. Validação de Nonce criptográfico (Prevenção de Replay Attack)
-            if (rawNonce != null && !rawNonce.isBlank() && payload.has("nonce")) {
-                String tokenNonce = payload.path("nonce").asText();
+            if (rawNonce != null && !rawNonce.isBlank()) {
+                String tokenNonce = payload.path("nonce").asText("");
                 String hashedRawNonce = sha256Hex(rawNonce);
-                if (!tokenNonce.equalsIgnoreCase(hashedRawNonce) && !tokenNonce.equals(rawNonce)) {
-                    log.warn("[Apple Auth] Nonce mismatch: tokenNonce={}, calculated={}", tokenNonce, hashedRawNonce);
+                if (tokenNonce.isBlank() || (!tokenNonce.equalsIgnoreCase(hashedRawNonce) && !tokenNonce.equals(rawNonce))) {
+                    throw new InvalidCredentialsException("Nonce criptográfico da Apple inválido.");
                 }
             }
 
             String sub = payload.path("sub").asText();
             if (sub == null || sub.isBlank()) {
-                throw new IllegalArgumentException("Claim 'sub' ausente no token da Apple.");
+                throw new InvalidCredentialsException("Claim 'sub' ausente no token da Apple.");
             }
 
             String email = payload.has("email") ? payload.path("email").asText() : null;
-            log.info("[Apple Auth] Token verificado com sucesso para sub={}", sub);
+            boolean emailVerified = !payload.has("email_verified")
+                || "true".equalsIgnoreCase(payload.path("email_verified").asText())
+                || payload.path("email_verified").asBoolean(false);
 
-            return new VerifiedSocialUser(sub, email, fallbackName, "APPLE");
-
-        } catch (IllegalArgumentException e) {
+            return new VerifiedSocialUser(sub, email, fallbackName, "APPLE", emailVerified);
+        } catch (InvalidCredentialsException e) {
             throw e;
         } catch (Exception e) {
-            log.error("[Apple Auth] Erro ao validar token: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("Falha na validação criptográfica do token da Apple: " + e.getMessage());
+            log.warn("[Apple Auth] Erro ao validar token: {}", e.getMessage());
+            throw new InvalidCredentialsException("Falha na validação criptográfica do token da Apple.");
         }
     }
 
-    // ==========================================
-    // 2. VALIDAÇÃO REAL GOOGLE SIGN-IN
-    // ==========================================
     private VerifiedSocialUser verifyGoogleToken(String idToken, String fallbackName) {
-        // Suporte a mock de desenvolvimento em simuladores
         if (!idToken.contains(".") || idToken.startsWith("google_identity_token")) {
-            log.warn("[Google Auth] Token de desenvolvimento detectado no simulador.");
-            return new VerifiedSocialUser("google_sim_" + System.currentTimeMillis(), null, fallbackName, "GOOGLE");
+            if (!allowDevSocialMock) {
+                throw new InvalidCredentialsException("ID Token Google inválido ou não aceito neste ambiente.");
+            }
+            log.warn("[Google Auth] Token simulado aceito exclusivamente em perfil de teste.");
+            return new VerifiedSocialUser("google_sim_test", null, fallbackName, "GOOGLE", true);
         }
 
         String[] parts = idToken.split("\\.");
         if (parts.length != 3) {
-            throw new IllegalArgumentException("Formato inválido do ID Token do Google.");
+            throw new InvalidCredentialsException("Formato inválido do ID Token do Google.");
         }
 
         try {
-            // 1. Decodifica Header para obter o 'kid'
             byte[] headerBytes = Base64.getUrlDecoder().decode(parts[0]);
             JsonNode headerNode = objectMapper.readTree(headerBytes);
             String kid = headerNode.path("kid").asText();
@@ -219,11 +225,10 @@ public class SocialAuthVerificationService {
                 refreshGoogleKeys();
                 publicKey = googleKeysCache.get(kid);
                 if (publicKey == null) {
-                    throw new IllegalArgumentException("Chave pública do Google não encontrada para kid: " + kid);
+                    throw new InvalidCredentialsException("Chave pública do Google não encontrada para kid: " + kid);
                 }
             }
 
-            // 2. Valida assinatura criptográfica RSA-SHA256
             byte[] signedContent = (parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8);
             byte[] signatureBytes = Base64.getUrlDecoder().decode(parts[2]);
 
@@ -232,41 +237,73 @@ public class SocialAuthVerificationService {
             verifier.update(signedContent);
 
             if (!verifier.verify(signatureBytes)) {
-                throw new IllegalArgumentException("Assinatura criptográfica do ID Token do Google INVÁLIDA.");
+                throw new InvalidCredentialsException("Assinatura criptográfica do ID Token do Google INVÁLIDA.");
             }
 
-            // 3. Valida Claims do Payload
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
             JsonNode payload = objectMapper.readTree(payloadBytes);
 
             String iss = payload.path("iss").asText();
             if (!"https://accounts.google.com".equals(iss) && !"accounts.google.com".equals(iss)) {
-                throw new IllegalArgumentException("Emissor inválido no token Google: " + iss);
+                throw new InvalidCredentialsException("Emissor inválido no token Google.");
+            }
+
+            if (!googleClientId.isEmpty() && !audienceMatches(payload.get("aud"), googleClientId)) {
+                throw new InvalidCredentialsException("Audience (client_id) inválido no token Google.");
             }
 
             long exp = payload.path("exp").asLong(0);
-            if (exp > 0 && Instant.now().getEpochSecond() > exp) {
-                throw new IllegalArgumentException("ID Token do Google expirado.");
+            if (exp <= 0 || Instant.now().getEpochSecond() > exp) {
+                throw new InvalidCredentialsException("ID Token do Google expirado.");
             }
 
             String sub = payload.path("sub").asText();
+            if (sub == null || sub.isBlank()) {
+                throw new InvalidCredentialsException("Claim 'sub' ausente no token do Google.");
+            }
+
             String email = payload.has("email") ? payload.path("email").asText() : null;
+            boolean emailVerified = payload.path("email_verified").asBoolean(false)
+                || "true".equalsIgnoreCase(payload.path("email_verified").asText());
+            if (email != null && !email.isBlank() && !emailVerified) {
+                throw new InvalidCredentialsException("E-mail da conta Google não verificado.");
+            }
             String name = payload.has("name") ? payload.path("name").asText() : fallbackName;
 
-            log.info("[Google Auth] Token verificado com sucesso para sub={}, email={}", sub, email);
-            return new VerifiedSocialUser(sub, email, name, "GOOGLE");
-
-        } catch (IllegalArgumentException e) {
+            return new VerifiedSocialUser(sub, email, name, "GOOGLE", emailVerified);
+        } catch (InvalidCredentialsException e) {
             throw e;
         } catch (Exception e) {
-            log.error("[Google Auth] Erro ao validar token: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("Falha na validação criptográfica do token do Google: " + e.getMessage());
+            log.warn("[Google Auth] Erro ao validar token: {}", e.getMessage());
+            throw new InvalidCredentialsException("Falha na validação criptográfica do token do Google.");
         }
     }
 
-    // ==========================================
-    // RECONSTRUÇÃO DE CHAVES PÚBLICAS RSA A PARTIR DE JWKS
-    // ==========================================
+    public static boolean audienceMatches(JsonNode audNode, String expectedAudiencesCommaSeparated) {
+        if (audNode == null || expectedAudiencesCommaSeparated == null || expectedAudiencesCommaSeparated.isBlank()) {
+            return false;
+        }
+        String[] allowed = expectedAudiencesCommaSeparated.split(",");
+        if (audNode.isArray()) {
+            for (JsonNode item : audNode) {
+                String v = item.asText("");
+                for (String a : allowed) {
+                    if (!a.isBlank() && a.trim().equals(v)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        String audText = audNode.asText("");
+        for (String a : allowed) {
+            if (!a.isBlank() && a.trim().equals(audText)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private PublicKey getApplePublicKey(String kid) {
         if (appleKeysCache.containsKey(kid) && Duration.between(lastAppleCacheRefresh, Instant.now()).toHours() < 24) {
             return appleKeysCache.get(kid);
@@ -295,7 +332,6 @@ public class SocialAuthVerificationService {
             if (response.statusCode() == 200) {
                 parseJwksIntoCache(response.body(), appleKeysCache);
                 lastAppleCacheRefresh = Instant.now();
-                log.info("[Apple Auth] Chaves públicas atualizadas: {} chaves em cache.", appleKeysCache.size());
             }
         } catch (Exception e) {
             log.warn("[Apple Auth] Não foi possível atualizar chaves públicas da Apple: {}", e.getMessage());
@@ -314,7 +350,6 @@ public class SocialAuthVerificationService {
             if (response.statusCode() == 200) {
                 parseJwksIntoCache(response.body(), googleKeysCache);
                 lastGoogleCacheRefresh = Instant.now();
-                log.info("[Google Auth] Chaves públicas atualizadas: {} chaves em cache.", googleKeysCache.size());
             }
         } catch (Exception e) {
             log.warn("[Google Auth] Não foi possível atualizar chaves públicas do Google: {}", e.getMessage());
@@ -356,22 +391,17 @@ public class SocialAuthVerificationService {
         }
     }
 
-    // =========================================================================
-    // 3. SIGN IN WITH APPLE TOKEN EXCHANGE & REVOCATION (Guideline 5.1.1(v))
-    // =========================================================================
-
     public String exchangeAppleAuthCodeForRefreshToken(String authorizationCode) {
         if (authorizationCode == null || authorizationCode.isBlank()) {
             return null;
         }
         String clientSecret = generateAppleClientSecret();
         if (clientSecret == null) {
-            log.info("[Apple Auth] APPLE_KEY_ID / APPLE_PRIVATE_KEY não configurados ainda; código recebido para troca futura.");
             return null;
         }
 
         try {
-            String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
+            String form = "client_id=" + urlEncode(appleBundleId)
                 + "&client_secret=" + urlEncode(clientSecret)
                 + "&code=" + urlEncode(authorizationCode.trim())
                 + "&grant_type=authorization_code";
@@ -388,16 +418,14 @@ public class SocialAuthVerificationService {
                 JsonNode json = objectMapper.readTree(resp.body());
                 String refreshToken = json.path("refresh_token").asText("");
                 if (!refreshToken.isBlank()) {
-                    log.info("[Apple Auth] Refresh token obtido com sucesso para suporte à revogação (Guideline 5.1.1(v)).");
                     return refreshToken;
                 }
                 String accessToken = json.path("access_token").asText("");
                 if (!accessToken.isBlank()) {
-                    log.info("[Apple Auth] Access token obtido para suporte à revogação (Guideline 5.1.1(v)).");
                     return accessToken;
                 }
             } else {
-                log.warn("[Apple Auth] Resposta HTTP {} ao trocar authorization_code: {}", resp.statusCode(), resp.body());
+                log.warn("[Apple Auth] Resposta HTTP {} ao trocar authorization_code", resp.statusCode());
             }
         } catch (Exception e) {
             log.warn("[Apple Auth] Falha ao trocar authorization_code da Apple: {}", e.getMessage());
@@ -419,19 +447,17 @@ public class SocialAuthVerificationService {
         }
 
         if (tokensToRevoke.isEmpty()) {
-            log.info("[Apple Auth] Nenhum token Apple armazenado ou recém-emitido para revogar; prosseguindo com exclusão integral dos dados.");
             return;
         }
 
         String clientSecret = generateAppleClientSecret();
         if (clientSecret == null) {
-            log.warn("[Apple Auth] Revogação Apple ignorada pois APPLE_KEY_ID / APPLE_PRIVATE_KEY não estão definidos.");
             return;
         }
 
         for (String tokenToRevoke : tokensToRevoke) {
             try {
-                String form = "client_id=" + urlEncode(APP_BUNDLE_ID)
+                String form = "client_id=" + urlEncode(appleBundleId)
                     + "&client_secret=" + urlEncode(clientSecret)
                     + "&token=" + urlEncode(tokenToRevoke)
                     + "&token_type_hint=refresh_token";
@@ -445,19 +471,15 @@ public class SocialAuthVerificationService {
 
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                    log.info("[Apple Auth] Token Sign in with Apple revogado com sucesso na Apple (HTTP {}).", resp.statusCode());
+                    log.info("[Apple Auth] Token Sign in with Apple revogado com sucesso (HTTP {}).", resp.statusCode());
                 } else {
-                    log.warn("[Apple Auth] Apple /auth/revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+                    log.warn("[Apple Auth] Apple /auth/revoke retornou HTTP {}", resp.statusCode());
                 }
             } catch (Exception e) {
                 log.warn("[Apple Auth] Falha de rede ao chamar /auth/revoke da Apple: {}", e.getMessage());
             }
         }
     }
-
-    // =========================================================================
-    // 4. GOOGLE OAUTH 2.0 TOKEN REVOCATION (RFC 7009)
-    // =========================================================================
 
     public void revokeGoogleTokensOnAccountDeletion(String storedGoogleToken, String clientProvidedGoogleToken) {
         java.util.LinkedHashSet<String> tokensToRevoke = new java.util.LinkedHashSet<>();
@@ -469,7 +491,6 @@ public class SocialAuthVerificationService {
         }
 
         if (tokensToRevoke.isEmpty()) {
-            log.info("[Google Auth] Nenhum token OAuth do Google armazenado para revogar; prosseguindo com exclusão integral dos dados.");
             return;
         }
 
@@ -485,10 +506,10 @@ public class SocialAuthVerificationService {
 
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                    log.info("[Google Auth] Token Google OAuth revogado com sucesso no Google (HTTP {}).", resp.statusCode());
-                    return; // Revogar o refresh_token (ou access_token ativo) já invalida toda a concessão OAuth do app na conta Google
+                    log.info("[Google Auth] Token Google OAuth revogado com sucesso (HTTP {}).", resp.statusCode());
+                    return;
                 } else {
-                    log.warn("[Google Auth] Google /revoke retornou HTTP {}: {}", resp.statusCode(), resp.body());
+                    log.warn("[Google Auth] Google /revoke retornou HTTP {}", resp.statusCode());
                 }
             } catch (Exception e) {
                 log.warn("[Google Auth] Falha de rede ao chamar oauth2.googleapis.com/revoke: {}", e.getMessage());
@@ -525,7 +546,7 @@ public class SocialAuthVerificationService {
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(300)))
                 .audience().add(APPLE_ISSUER).and()
-                .subject(APP_BUNDLE_ID)
+                .subject(appleBundleId)
                 .signWith(ecPrivateKey, Jwts.SIG.ES256)
                 .compact();
         } catch (Exception e) {

@@ -34,7 +34,7 @@ public class AdminEventPublisherService {
             "id", log.getId(),
             "userId", log.getUserId(),
             "endpoint", log.getEndpoint(),
-            "promptSummary", log.getPromptSummary(),
+            "promptSummary", "[Solicitação autenticada — conteúdo protegido pela LGPD]",
             "status", log.getStatus(),
             "durationMs", log.getDurationMs(),
             "createdAt", log.getCreatedAt().toString(),
@@ -45,8 +45,8 @@ public class AdminEventPublisherService {
     public void publishUserActivity(String event, String email, String name, String authProvider, long totalUsers) {
         webSocketHandler.broadcast("USER_ACTIVITY", Map.of(
             "event", event,
-            "email", email,
-            "name", name != null ? name : "Atleta",
+            "email", maskEmail(email),
+            "name", maskName(name),
             "authProvider", authProvider != null ? authProvider : "EMAIL",
             "totalUsers", totalUsers
         ));
@@ -96,5 +96,18 @@ public class AdminEventPublisherService {
         } else {
             action.run();
         }
+    }
+
+    private static String maskEmail(String email) {
+        if (email == null || email.isBlank()) return "***";
+        int at = email.indexOf('@');
+        if (at <= 1) return "***" + (at >= 0 ? email.substring(at) : "");
+        return email.charAt(0) + "***" + email.substring(at);
+    }
+
+    private static String maskName(String name) {
+        if (name == null || name.isBlank()) return "Atleta";
+        String trimmed = name.trim();
+        return trimmed.charAt(0) + "***";
     }
 }

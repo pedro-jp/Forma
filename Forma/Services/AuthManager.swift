@@ -176,6 +176,10 @@ public final class AuthManager: ObservableObject {
             return [Self.defaultServerUrl]
         }
 
+        #if !DEBUG
+        // Em builds Release, exige obrigatoriamente HTTPS configurado (bloqueia cleartext HTTP LAN/loopback)
+        return [Self.defaultServerUrl]
+        #else
         var list: [String] = []
         if let plistUrl = Self.configuredPlistUrl, !plistUrl.isEmpty {
             list.append(plistUrl)
@@ -208,6 +212,7 @@ public final class AuthManager: ObservableObject {
 
         var seen = Set<String>()
         return list.filter { seen.insert($0).inserted }
+        #endif
     }
 
     // MARK: - Estados Publicados
@@ -234,7 +239,6 @@ public final class AuthManager: ObservableObject {
     public func updateAccountTier(_ rawTier: String?, notifyUser: Bool = false) {
         let resolved = AccountTier.from(rawTier)
         let didChange = (self.accountTier != resolved)
-        AIDataConsentManager.shared.setConsent(resolved == .pro)
 
         if didChange {
             withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
@@ -296,16 +300,30 @@ public final class AuthManager: ObservableObject {
             UserDefaults.standard.set(resolvedUrl, forKey: Self.boundServerOriginKey)
         }
 
-        restoreSession()
+        loadPersistedSessionSynchronously()
+        DispatchQueue.main.async {
+            AuthManager.shared.completePostInitStartup()
+        }
     }
 
-    // MARK: - Restauração de Sessão Segura via Keychain
-    public func restoreSession() {
-        let token = KeychainHelper.shared.loadString(key: tokenKey) ?? UserDefaults.standard.string(forKey: tokenKey)
-        let userId = KeychainHelper.shared.loadString(key: userIdKey) ?? UserDefaults.standard.string(forKey: userIdKey)
+    private func loadPersistedSessionSynchronously() {
+        let keychainToken = KeychainHelper.shared.loadString(key: tokenKey)
+        let legacyDefaultsToken = UserDefaults.standard.string(forKey: tokenKey)
+        let token = keychainToken ?? legacyDefaultsToken
+        if keychainToken == nil, let legacy = legacyDefaultsToken, !legacy.isEmpty {
+            KeychainHelper.shared.save(key: tokenKey, string: legacy)
+        }
+        UserDefaults.standard.removeObject(forKey: tokenKey)
+
+        let keychainUserId = KeychainHelper.shared.loadString(key: userIdKey)
+        let legacyDefaultsUserId = UserDefaults.standard.string(forKey: userIdKey)
+        let userId = keychainUserId ?? legacyDefaultsUserId
+        if keychainUserId == nil, let legacyId = legacyDefaultsUserId, !legacyId.isEmpty {
+            KeychainHelper.shared.save(key: userIdKey, string: legacyId)
+        }
+        UserDefaults.standard.removeObject(forKey: userIdKey)
 
         if let token, !token.isEmpty, let userId, !userId.isEmpty {
-            UserDefaults.standard.set(userId, forKey: userIdKey)
             self.jwtToken = token
             self.currentUserId = userId
             self.currentUserEmail = KeychainHelper.shared.loadString(key: userEmailKey) ?? UserDefaults.standard.string(forKey: userEmailKey)
@@ -313,22 +331,8 @@ public final class AuthManager: ObservableObject {
             self.currentAuthProvider = KeychainHelper.shared.loadString(key: authProviderKey) ?? UserDefaults.standard.string(forKey: authProviderKey)
             let storedTier = KeychainHelper.shared.loadString(key: accountTierKey) ?? UserDefaults.standard.string(forKey: accountTierKey)
             self.accountTier = AccountTier.from(storedTier)
-
-            let activeLocalId = UserDefaults.standard.string(forKey: BackendSyncManager.activeLocalUserIdKey)
-            if activeLocalId != userId {
-                BackendSyncManager.shared.markRequiresInitialPull(true)
-                BackendSyncManager.shared.hasCompletedInitialSessionPull = false
-            } else if let localProfile = try? FormaDataStore.shared.mainContext.fetch(FetchDescriptor<Profile>()).first,
-                      localProfile.onboardingCompleted {
-                BackendSyncManager.shared.hasCompletedInitialSessionPull = true
-            }
-
             self.isAuthenticated = true
             self.isGuest = false
-            Task { @MainActor in
-                AIDataConsentManager.shared.setConsent(self.accountTier == .pro)
-                AccountRealtimeSocketManager.shared.connectIfNeeded()
-            }
         } else {
             self.jwtToken = nil
             self.currentUserId = nil
@@ -338,6 +342,36 @@ public final class AuthManager: ObservableObject {
             self.accountTier = .free
             self.isAuthenticated = false
             self.isGuest = false
+        }
+    }
+
+    public func completePostInitStartup() {
+        guard isAuthenticated, let userId = currentUserId, !userId.isEmpty else {
+            AIDataConsentManager.shared.refreshForCurrentUser()
+            return
+        }
+
+        let activeLocalId = UserDefaults.standard.string(forKey: BackendSyncManager.activeLocalUserIdKey)
+        if activeLocalId != userId {
+            BackendSyncManager.shared.markRequiresInitialPull(true)
+            BackendSyncManager.shared.hasCompletedInitialSessionPull = false
+        } else if let localProfile = try? FormaDataStore.shared.mainContext.fetch(FetchDescriptor<Profile>()).first,
+                  localProfile.onboardingCompleted {
+            BackendSyncManager.shared.hasCompletedInitialSessionPull = true
+        }
+
+        AIDataConsentManager.shared.refreshForCurrentUser()
+        AccountRealtimeSocketManager.shared.connectIfNeeded()
+        Task { @MainActor in
+            await AIDataConsentManager.shared.refreshFromBackendIfAuthenticated()
+        }
+    }
+
+    // MARK: - Restauração de Sessão Segura via Keychain
+    public func restoreSession() {
+        loadPersistedSessionSynchronously()
+        DispatchQueue.main.async {
+            AuthManager.shared.completePostInitStartup()
         }
     }
 
@@ -366,7 +400,15 @@ public final class AuthManager: ObservableObject {
     }
 
     // MARK: - Cadastro com E-mail e Senha
-    public func register(name: String, email: String, password: String) async throws {
+    public func register(
+        name: String,
+        email: String,
+        password: String,
+        termsAccepted: Bool = true,
+        sensitiveHealthConsentGranted: Bool = true,
+        aiConsentGranted: Bool = false,
+        ageConfirmed18Plus: Bool = true
+    ) async throws {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let cleanPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -374,8 +416,14 @@ public final class AuthManager: ObservableObject {
         guard !cleanName.isEmpty, !cleanEmail.isEmpty, !cleanPassword.isEmpty else {
             throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "Preencha todos os campos."])
         }
-        guard cleanPassword.count >= 6 else {
-            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A senha deve ter pelo menos 6 caracteres."])
+        guard cleanPassword.count >= 8 else {
+            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A senha deve ter pelo menos 8 caracteres."])
+        }
+        guard ageConfirmed18Plus else {
+            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "É necessário confirmar que você possui 18 anos ou mais (LGPD Art. 14)."])
+        }
+        guard termsAccepted && sensitiveHealthConsentGranted else {
+            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "Aceite os Termos, a Política de Privacidade e o tratamento de dados de saúde (LGPD Art. 11)."])
         }
 
         isAuthenticating = true
@@ -385,7 +433,16 @@ public final class AuthManager: ObservableObject {
         let data = try await FormaAPIClient.shared.requestData(
             path: "/api/auth/register",
             method: "POST",
-            jsonBody: ["name": cleanName, "email": cleanEmail, "password": cleanPassword],
+            jsonBody: [
+                "name": cleanName,
+                "email": cleanEmail,
+                "password": cleanPassword,
+                "termsAccepted": termsAccepted,
+                "termsVersion": "2026-11-v2",
+                "sensitiveHealthConsentGranted": sensitiveHealthConsentGranted,
+                "aiConsentGranted": aiConsentGranted,
+                "ageConfirmed18Plus": ageConfirmed18Plus
+            ],
             authenticated: false,
             timeout: 12.0,
             interceptAccountStatus: false
@@ -470,8 +527,8 @@ public final class AuthManager: ObservableObject {
         guard !cleanEmail.isEmpty, cleanCode.count == 6 else {
             throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "Informe o e-mail e o código de 6 dígitos."])
         }
-        guard cleanPassword.count >= 6 else {
-            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A nova senha deve ter pelo menos 6 caracteres."])
+        guard cleanPassword.count >= 8 else {
+            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A nova senha deve ter pelo menos 8 caracteres."])
         }
 
         isAuthenticating = true
@@ -497,8 +554,8 @@ public final class AuthManager: ObservableObject {
         let cleanCurrent = currentPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanNew = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard cleanNew.count >= 6 else {
-            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A nova senha deve ter pelo menos 6 caracteres."])
+        guard cleanNew.count >= 8 else {
+            throw NSError(domain: "Auth", code: 400, userInfo: [NSLocalizedDescriptionKey: "A nova senha deve ter pelo menos 8 caracteres."])
         }
 
         _ = try await FormaAPIClient.shared.requestData(
@@ -553,6 +610,7 @@ public final class AuthManager: ObservableObject {
 
     // MARK: - Logout Seguro
     public func logout() {
+        let tokenToRevoke = self.jwtToken
         AccountRealtimeSocketManager.shared.disconnect()
         toastDismissTask?.cancel()
         self.realtimeToastMessage = nil
@@ -564,6 +622,19 @@ public final class AuthManager: ObservableObject {
         self.currentUserName = nil
         self.currentAuthProvider = nil
         self.accountTier = .free
+
+        if let tokenToRevoke, !tokenToRevoke.isEmpty {
+            Task {
+                _ = try? await FormaAPIClient.shared.requestData(
+                    path: "/api/auth/logout",
+                    method: "POST",
+                    authenticated: true,
+                    timeout: 8.0,
+                    interceptAccountStatus: false,
+                    overrideBearerToken: tokenToRevoke
+                )
+            }
+        }
 
         KeychainHelper.shared.delete(key: tokenKey)
         KeychainHelper.shared.delete(key: userIdKey)
@@ -588,7 +659,8 @@ public final class AuthManager: ObservableObject {
         BackendSyncManager.shared.clearAllPendingDeletions()
         BackendSyncManager.shared.markRequiresInitialPull(false)
         BackendSyncManager.shared.hasCompletedInitialSessionPull = false
-        AIDataConsentManager.shared.refreshForCurrentUser()
+        AIDataConsentManager.shared.clearConsentForCurrentUser()
+        WidgetDataManager.shared.clearAllUserData()
         FormaDataStore.shared.resetLocalDataForUserSwitch(userName: nil, userEmail: nil)
     }
 
@@ -638,7 +710,8 @@ public final class AuthManager: ObservableObject {
         UserDefaults.standard.set(result.userId, forKey: BackendSyncManager.activeLocalUserIdKey)
 
         // 2. Grava credenciais em memória e no Keychain antes do pull inicial
-        UserDefaults.standard.set(result.userId, forKey: userIdKey)
+        UserDefaults.standard.removeObject(forKey: tokenKey)
+        UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.set(result.email, forKey: userEmailKey)
         UserDefaults.standard.set(result.name, forKey: userNameKey)
         UserDefaults.standard.removeObject(forKey: "forma_is_guest")
@@ -663,7 +736,10 @@ public final class AuthManager: ObservableObject {
         }
 
         self.updateAccountTier(result.accountTier)
-        AIDataConsentManager.shared.setConsent(self.isPro)
+        AIDataConsentManager.shared.refreshForCurrentUser()
+        Task { @MainActor in
+            await AIDataConsentManager.shared.refreshFromBackendIfAuthenticated()
+        }
 
         // 3. Aplica dados imediatos do perfil retornados pelo servidor
         let localProfile = FormaDataStore.shared.ensureSingleProfile(in: FormaDataStore.shared.mainContext)
@@ -817,13 +893,21 @@ public final class AccountRealtimeSocketManager: ObservableObject {
         if wsBase.lowercased().hasPrefix("https://") {
             wsBase = "wss://" + wsBase.dropFirst("https://".count)
         } else if wsBase.lowercased().hasPrefix("http://") {
+            #if !DEBUG
+            return nil
+            #else
             wsBase = "ws://" + wsBase.dropFirst("http://".count)
+            #endif
         } else {
+            #if !DEBUG
+            wsBase = "wss://" + wsBase
+            #else
             wsBase = "ws://" + wsBase
+            #endif
         }
 
-        let encodedToken = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? token
-        guard let url = URL(string: "\(wsBase)/ws/account?token=\(encodedToken)") else {
+        // Token enviado exclusivamente via cabeçalho Authorization (nunca em query string ?token=)
+        guard let url = URL(string: "\(wsBase)/ws/account") else {
             return nil
         }
 
