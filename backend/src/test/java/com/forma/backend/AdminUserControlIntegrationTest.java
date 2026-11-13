@@ -163,7 +163,29 @@ class AdminUserControlIntegrationTest {
 
         mockMvc.perform(get("/api/sync/pull")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token()))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.accountTier").value("FREE"));
+
+        // 2b. Conta FREE bloqueia IA por padrão (403) até ser promovida para PRO pelo Admin
+        mockMvc.perform(post("/api/ai/analyze-workout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"description\":\"Supino 4x10\",\"userWeight\":75.0,\"userName\":\"Atleta\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.aiBlockedForUser").value(true));
+
+        // 2c. Admin promove conta para PRO -> reflete no retorno e no /api/sync/pull
+        mockMvc.perform(post("/api/admin/users/" + user.userId() + "/tier")
+                .cookie(adminCookie)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new AdminDto.UserTierRequest("PRO"))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.accountTier").value("PRO"));
+
+        mockMvc.perform(get("/api/sync/pull")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.accountTier").value("PRO"));
 
         // 3. Bloquear IA individualmente -> 403 aiBlockedForUser
         mockMvc.perform(post("/api/admin/users/" + user.userId() + "/ai-access")

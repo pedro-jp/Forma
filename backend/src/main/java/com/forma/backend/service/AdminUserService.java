@@ -125,6 +125,7 @@ public class AdminUserService {
         user.setPasswordHash(authService.hashPassword(req.password()));
         user.setAuthProvider("EMAIL");
         user.setStatus("ACTIVE");
+        user.setAccountTier(User.normalizeTier(req.accountTier()));
         user.setAiBlocked(false);
         if (req.dailyAiLimit() != null && req.dailyAiLimit() > 0) {
             user.setDailyAiLimit(req.dailyAiLimit());
@@ -155,6 +156,9 @@ public class AdminUserService {
             }
             if (req.newPassword() != null && !req.newPassword().isBlank()) {
                 user.setPasswordHash(authService.hashPassword(req.newPassword().trim()));
+            }
+            if (req.accountTier() != null && !req.accountTier().isBlank()) {
+                user.setAccountTier(User.normalizeTier(req.accountTier()));
             }
         }
         User saved = userRepository.save(user);
@@ -211,6 +215,19 @@ public class AdminUserService {
 
         User saved = userRepository.save(user);
         broadcastState("ADMIN_USER_AI_UPDATED", saved);
+        return toSummary(saved, currentStartOfDay());
+    }
+
+    @Transactional
+    public AdminDto.UserSummaryDto updateAccountTier(UUID userId, AdminDto.UserTierRequest req) {
+        User user = findUserOrThrow(userId);
+        String nextTier = (req != null && req.accountTier() != null && !req.accountTier().isBlank())
+            ? User.normalizeTier(req.accountTier())
+            : (user.isPro() ? "FREE" : "PRO");
+        user.setAccountTier(nextTier);
+
+        User saved = userRepository.save(user);
+        broadcastState("PRO".equals(nextTier) ? "ADMIN_USER_TIER_PRO" : "ADMIN_USER_TIER_FREE", saved);
         return toSummary(saved, currentStartOfDay());
     }
 
@@ -318,6 +335,7 @@ public class AdminUserService {
             user.getAuthProvider(),
             userRepository.count()
         );
+        adminEventPublisherService.publishUserAccountDeleted(userId);
     }
 
     private User findUserOrThrow(UUID userId) {
@@ -337,6 +355,7 @@ public class AdminUserService {
             user.getAuthProvider(),
             userRepository.count()
         );
+        adminEventPublisherService.publishUserAccountState(user, eventName);
     }
 
     private AdminDto.UserSummaryDto toSummary(User u, Instant startOfDay) {
@@ -367,7 +386,8 @@ public class AdminUserService {
             u.getCreatedAt(),
             u.getLastLoginAt(),
             u.getLastSyncedAt(),
-            u.getForceResetAt()
+            u.getForceResetAt(),
+            u.getAccountTier()
         );
     }
 }

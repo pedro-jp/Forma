@@ -50,10 +50,12 @@ struct FormaApp: App {
             .task {
                 cleanupLegacyCalorieLiveActivities()
                 WorkoutNotificationManager.shared.setup()
+                WatchConnectivityManager.shared.setup()
                 if authManager.isAuthenticated {
                     FormaDataStore.shared.setupBackgroundHealthObserver()
                     FormaDataStore.shared.syncTodayData()
                     checkPendingWorkout()
+                    WatchConnectivityManager.shared.syncContextToWatch()
                     if !syncManager.hasCompletedInitialSessionPull {
                         triggerSync()
                     }

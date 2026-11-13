@@ -4,6 +4,7 @@ export interface UserSummary {
   name: string;
   authProvider: 'APPLE' | 'GOOGLE' | 'EMAIL' | string;
   status: 'ACTIVE' | 'PAUSED' | string;
+  accountTier?: 'FREE' | 'PRO' | string;
   pausedReason?: string | null;
   aiBlocked: boolean;
   dailyAiLimit?: number | null;

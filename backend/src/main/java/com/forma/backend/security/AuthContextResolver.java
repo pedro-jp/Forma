@@ -99,6 +99,12 @@ public class AuthContextResolver {
         if (userId != null) {
             String tokenEmail = extractBearerEmail(authHeader);
             User user = verifyUserAccountActive(userId, tokenEmail);
+            if (!user.isPro()) {
+                throw new AiBlockedException(
+                    "Esta conta está na camada Free (Essencial). Os recursos de Inteligência Artificial são exclusivos da camada Forma Pro.",
+                    false
+                );
+            }
             if (user.isAiBlocked()) {
                 throw new AiBlockedException(
                     "O acesso à Inteligência Artificial está desativado para esta conta.",

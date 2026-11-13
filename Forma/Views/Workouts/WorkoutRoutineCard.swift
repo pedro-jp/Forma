@@ -130,10 +130,10 @@ struct RoutineCard: View {
                             Button {
                                 onShowExerciseDetail?(ex)
                             } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "info.circle.fill")
-                                        .font(.system(size: 13))
-                                    Text("GIF")
+                                HStack(spacing: 4) {
+                                    Image(systemName: "play.tv.fill")
+                                        .font(.system(size: 12))
+                                    Text("Vídeo")
                                         .font(.system(size: 11, weight: .bold))
                                 }
                                 .foregroundStyle(FormaTheme.Colors.brand)

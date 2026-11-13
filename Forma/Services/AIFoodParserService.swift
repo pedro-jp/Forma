@@ -97,6 +97,7 @@ public struct ParsedMealResult: Sendable {
     public var totalCarbs: Double
     public var totalFat: Double
     public var overallConfidence: Double
+    public var aiSummary: String
     
     public init(
         rawText: String,
@@ -106,7 +107,8 @@ public struct ParsedMealResult: Sendable {
         totalProtein: Double,
         totalCarbs: Double,
         totalFat: Double,
-        overallConfidence: Double
+        overallConfidence: Double,
+        aiSummary: String = ""
     ) {
         self.rawText = rawText
         self.mealType = mealType
@@ -116,6 +118,7 @@ public struct ParsedMealResult: Sendable {
         self.totalCarbs = totalCarbs
         self.totalFat = totalFat
         self.overallConfidence = overallConfidence
+        self.aiSummary = aiSummary
     }
 }
 
@@ -134,9 +137,8 @@ public final class AIFoodParserService: Sendable {
         allowCloudAI: Bool = true,
         onPhaseChange: (@Sendable (AnalysisPhase) -> Void)? = nil
     ) async -> ParsedMealResult {
-        if allowCloudAI || forceAI {
-            onPhaseChange?(forceAI ? .artificialIntelligence : .tacoDatabase)
-        }
+        let shouldUseCloudAI = allowCloudAI || forceAI
+        onPhaseChange?(shouldUseCloudAI ? .artificialIntelligence : .tacoDatabase)
         
         let cleanedInput = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedInput.isEmpty else {
@@ -156,8 +158,8 @@ public final class AIFoodParserService: Sendable {
         let sanitizedText = stripConversationalNoise(from: cleanedInput)
         let rawSegments = segmentDishes(from: sanitizedText)
         
-        // 1. TENTA PRIMEIRO A BASE LOCAL INSTANTÂNEA (Tabela TACO Brasil - 0ms) se forceAI for false
-        if !forceAI {
+        // 1. MODO ESSENCIAL / OFFLINE (allowCloudAI == false e forceAI == false): usa exclusivamente a Tabela TACO Brasil
+        if !shouldUseCloudAI {
             var localParsedItems: [ParsedFoodItem] = []
             for segment in rawSegments {
                 if let item = processLocalSegment(segment) {
@@ -165,7 +167,6 @@ public final class AIFoodParserService: Sendable {
                 }
             }
             
-            // Se todos os componentes foram identificados com sucesso na base local offline, retorna de imediato
             if !localParsedItems.isEmpty && localParsedItems.count >= rawSegments.count {
                 let totalCal = localParsedItems.reduce(0.0) { $0 + $1.calories }
                 let totalProt = localParsedItems.reduce(0.0) { $0 + $1.protein }
@@ -182,29 +183,11 @@ public final class AIFoodParserService: Sendable {
                     overallConfidence: 0.98
                 )
             }
-            
-            // Enquanto o usuário ainda está digitando/editando (allowCloudAI == false), NUNCA dispara requisição para a IA
-            if !allowCloudAI {
-                return ParsedMealResult(
-                    rawText: cleanedInput,
-                    mealType: mealType,
-                    items: [],
-                    totalCalories: 0,
-                    totalProtein: 0,
-                    totalCarbs: 0,
-                    totalFat: 0,
-                    overallConfidence: 0
-                )
-            }
         }
         
-        // 2. ANÁLISE COM INTELIGÊNCIA ARTIFICIAL (Forçada pelo usuário ou Fallback quando item não consta na TACO após finalizar entrada)
-        if AIDataConsentManager.isConsentGranted && ((allowCloudAI && GeminiConfig.shared.hasValidKey) || forceAI) {
+        // 2. MODO FORMA PRO — ANÁLISE 100% COM INTELIGÊNCIA FORMA (Google Gemini via Proxy Seguro)
+        if shouldUseCloudAI && GeminiConfig.shared.hasValidKey {
             onPhaseChange?(.artificialIntelligence)
-            // Intervalo suave para percepção visual da transição
-            if !forceAI {
-                try? await Task.sleep(nanoseconds: 120_000_000)
-            }
             if Task.isCancelled {
                 return ParsedMealResult(
                     rawText: cleanedInput,
@@ -220,6 +203,18 @@ public final class AIFoodParserService: Sendable {
             
             do {
                 let aiMeal = try await GeminiAIService.shared.analyzeMeal(description: cleanedInput)
+                if Task.isCancelled {
+                    return ParsedMealResult(
+                        rawText: cleanedInput,
+                        mealType: mealType,
+                        items: [],
+                        totalCalories: 0,
+                        totalProtein: 0,
+                        totalCarbs: 0,
+                        totalFat: 0,
+                        overallConfidence: 0
+                    )
+                }
                 let detectedMealType = MealType(rawValue: aiMeal.mealType) ?? mealType
                 let items: [ParsedFoodItem] = aiMeal.items.map { item in
                     ParsedFoodItem(
@@ -238,16 +233,19 @@ public final class AIFoodParserService: Sendable {
                     )
                 }
                 
-                return ParsedMealResult(
-                    rawText: cleanedInput,
-                    mealType: detectedMealType,
-                    items: items,
-                    totalCalories: aiMeal.totalCalories,
-                    totalProtein: aiMeal.totalProtein,
-                    totalCarbs: aiMeal.totalCarbs,
-                    totalFat: aiMeal.totalFat,
-                    overallConfidence: 0.99
-                )
+                if !items.isEmpty {
+                    return ParsedMealResult(
+                        rawText: cleanedInput,
+                        mealType: detectedMealType,
+                        items: items,
+                        totalCalories: aiMeal.totalCalories,
+                        totalProtein: aiMeal.totalProtein,
+                        totalCarbs: aiMeal.totalCarbs,
+                        totalFat: aiMeal.totalFat,
+                        overallConfidence: 0.99,
+                        aiSummary: aiMeal.aiSummary
+                    )
+                }
             } catch {
                 print("⚠️ [AIFoodParser] Análise IA em nuvem indisponível: \(error.localizedDescription)")
             }

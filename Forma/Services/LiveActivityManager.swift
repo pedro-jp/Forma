@@ -109,13 +109,24 @@ public final class LiveActivityManager: ObservableObject {
         restStartDate: Date? = nil,
         restEndDate: Date? = nil,
         restDurationSeconds: Int = 90,
-        isAllCompleted: Bool = false
+        isAllCompleted: Bool = false,
+        currentSetWeightKg: Double = 0.0,
+        lastCompletedSetNumber: Int = 0,
+        lastCompletedSetWeightKg: Double = 0.0,
+        lastCompletedExerciseName: String = ""
     ) {
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
             print("⚠️ [Live Activity] ATENÇÃO: As Atividades ao Vivo estão desativadas para o Forma nos Ajustes do iOS!")
             return
         }
+        
+        let shared = SharedWorkoutSessionManager.shared.loadSession()
+        let lastInfo = shared?.lastCompletedSetInfo
+        let resolvedCurWeight = currentSetWeightKg > 0 ? currentSetWeightKg : (shared?.currentSetWeightKg ?? 0.0)
+        let resolvedLastSetNum = lastCompletedSetNumber > 0 ? lastCompletedSetNumber : (lastInfo?.setNumber ?? 0)
+        let resolvedLastWeight = lastCompletedSetWeightKg > 0 ? lastCompletedSetWeightKg : (lastInfo?.weightKg ?? resolvedCurWeight)
+        let resolvedLastExName = !lastCompletedExerciseName.isEmpty ? lastCompletedExerciseName : (lastInfo?.exerciseName ?? currentExerciseName)
         
         let state = WorkoutActivityAttributes.ContentState(
             workoutTitle: workoutTitle,
@@ -130,7 +141,12 @@ public final class LiveActivityManager: ObservableObject {
             restStartDate: restStartDate,
             restEndDate: restEndDate,
             restDurationSeconds: restDurationSeconds,
-            isAllCompleted: isAllCompleted
+            isAllCompleted: isAllCompleted,
+            currentSetWeightKg: resolvedCurWeight,
+            lastCompletedSetNumber: resolvedLastSetNum,
+            lastCompletedSetWeightKg: resolvedLastWeight,
+            lastCompletedExerciseName: resolvedLastExName,
+            weightStepKg: SharedWorkoutSessionManager.shared.currentWeightStepKg
         )
         
         if let existing = Activity<WorkoutActivityAttributes>.activities.first {
@@ -166,8 +182,19 @@ public final class LiveActivityManager: ObservableObject {
         restStartDate: Date? = nil,
         restEndDate: Date? = nil,
         restDurationSeconds: Int = 90,
-        isAllCompleted: Bool = false
+        isAllCompleted: Bool = false,
+        currentSetWeightKg: Double = 0.0,
+        lastCompletedSetNumber: Int = 0,
+        lastCompletedSetWeightKg: Double = 0.0,
+        lastCompletedExerciseName: String = ""
     ) {
+        let shared = SharedWorkoutSessionManager.shared.loadSession()
+        let lastInfo = shared?.lastCompletedSetInfo
+        let resolvedCurWeight = currentSetWeightKg > 0 ? currentSetWeightKg : (shared?.currentSetWeightKg ?? 0.0)
+        let resolvedLastSetNum = lastCompletedSetNumber > 0 ? lastCompletedSetNumber : (lastInfo?.setNumber ?? 0)
+        let resolvedLastWeight = lastCompletedSetWeightKg > 0 ? lastCompletedSetWeightKg : (lastInfo?.weightKg ?? resolvedCurWeight)
+        let resolvedLastExName = !lastCompletedExerciseName.isEmpty ? lastCompletedExerciseName : (lastInfo?.exerciseName ?? currentExerciseName)
+        
         guard let current = Activity<WorkoutActivityAttributes>.activities.first else {
             startWorkoutActivity(
                 workoutTitle: workoutTitle,
@@ -182,7 +209,11 @@ public final class LiveActivityManager: ObservableObject {
                 restStartDate: restStartDate,
                 restEndDate: restEndDate,
                 restDurationSeconds: restDurationSeconds,
-                isAllCompleted: isAllCompleted
+                isAllCompleted: isAllCompleted,
+                currentSetWeightKg: resolvedCurWeight,
+                lastCompletedSetNumber: resolvedLastSetNum,
+                lastCompletedSetWeightKg: resolvedLastWeight,
+                lastCompletedExerciseName: resolvedLastExName
             )
             return
         }
@@ -200,7 +231,12 @@ public final class LiveActivityManager: ObservableObject {
             restStartDate: restStartDate,
             restEndDate: restEndDate,
             restDurationSeconds: restDurationSeconds,
-            isAllCompleted: isAllCompleted
+            isAllCompleted: isAllCompleted,
+            currentSetWeightKg: resolvedCurWeight,
+            lastCompletedSetNumber: resolvedLastSetNum,
+            lastCompletedSetWeightKg: resolvedLastWeight,
+            lastCompletedExerciseName: resolvedLastExName,
+            weightStepKg: SharedWorkoutSessionManager.shared.currentWeightStepKg
         )
         
         Task { @MainActor in

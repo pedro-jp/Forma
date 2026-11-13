@@ -36,6 +36,9 @@ public class User {
     @Column(name = "status")
     private String status = "ACTIVE";
 
+    @Column(name = "account_tier")
+    private String accountTier = "FREE";
+
     @Column(name = "paused_reason")
     private String pausedReason;
 
@@ -101,6 +104,15 @@ public class User {
     public String getStatus() { return (status == null || status.isBlank()) ? "ACTIVE" : status; }
     public void setStatus(String status) { this.status = status; }
     public boolean isPaused() { return "PAUSED".equalsIgnoreCase(getStatus()); }
+
+    public static String normalizeTier(String rawTier) {
+        if (rawTier == null) return "FREE";
+        return "PRO".equalsIgnoreCase(rawTier.trim()) ? "PRO" : "FREE";
+    }
+
+    public String getAccountTier() { return normalizeTier(accountTier); }
+    public void setAccountTier(String accountTier) { this.accountTier = normalizeTier(accountTier); }
+    public boolean isPro() { return "PRO".equalsIgnoreCase(getAccountTier()); }
 
     public String getPausedReason() { return pausedReason; }
     public void setPausedReason(String pausedReason) { this.pausedReason = pausedReason; }

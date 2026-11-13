@@ -17,6 +17,13 @@ android {
 
         resValue "string", "backend_base_url", (project.findProperty("BACKEND_BASE_URL") ?: "https://forma-94vp.onrender.com")
 
+        // Google OAuth (PKCE): GOOGLE_CLIENT_ID opcional em gradle.properties; sem ele o app lê googleClientId de /api/auth/config.
+        // O scheme do redirect (reverse client id) precisa estar no manifesto: padrão = client id público do backend.
+        def googleClientIdProp = (project.findProperty("GOOGLE_CLIENT_ID") ?: "").toString().trim()
+        def googleClientIdForScheme = googleClientIdProp ? googleClientIdProp : "1092895218480-kca5pj9b1g8r50t66phm6ccnupr83p94.apps.googleusercontent.com"
+        resValue "string", "google_client_id", googleClientIdProp
+        manifestPlaceholders = [googleRedirectScheme: "com.googleusercontent.apps." + googleClientIdForScheme.replace(".apps.googleusercontent.com", "")]
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
@@ -75,6 +82,15 @@ dependencies {
 
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+
+    // Health Connect (equivalente ao HealthKit do iOS)
+    implementation 'androidx.health.connect:connect-client:1.1.0-alpha07'
+
+    // Chrome Custom Tabs para o login Google OAuth (equivalente ao ASWebAuthenticationSession)
+    implementation 'androidx.browser:browser:1.8.0'
+
+    // Armazenamento seguro de sessão (JWT) – equivalente ao Keychain do iOS
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'

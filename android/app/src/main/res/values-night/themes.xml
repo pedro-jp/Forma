@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Forma" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/forma_system_background</item>
+        <item name="android:colorAccent">@color/forma_accent</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

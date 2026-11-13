@@ -444,6 +444,18 @@ public class AdminController {
         return ResponseEntity.ok(adminUserService.updateAiAccess(userId, req));
     }
 
+    @PostMapping("/users/{userId}/tier")
+    public ResponseEntity<AdminDto.UserSummaryDto> updateUserTier(
+        @PathVariable UUID userId,
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken,
+        @RequestBody(required = false) AdminDto.UserTierRequest req
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        return ResponseEntity.ok(adminUserService.updateAccountTier(userId, req));
+    }
+
     @PostMapping("/users/{userId}/reset")
     public ResponseEntity<?> resetUserAccount(
         @PathVariable UUID userId,

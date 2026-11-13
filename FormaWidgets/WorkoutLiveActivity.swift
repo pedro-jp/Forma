@@ -26,17 +26,75 @@ struct ResolvedWorkoutLiveState {
     let restDurationSeconds: Int
     let isAllCompleted: Bool
     
+    let currentSetWeightKg: Double
+    let lastCompletedSetNumber: Int
+    let lastCompletedSetWeightKg: Double
+    let lastCompletedExerciseName: String
+    let weightStepKg: Double
+    
+    var stepFormatted: String {
+        if weightStepKg.truncatingRemainder(dividingBy: 1.0) == 0 {
+            return "\(Int(weightStepKg))"
+        }
+        return String(format: "%.1f", weightStepKg)
+    }
+    
     var overallProgress: Double {
         guard totalSetsTotal > 0 else { return 0 }
         return min(1.0, max(0.0, Double(completedSetsTotal) / Double(totalSetsTotal)))
     }
     
+    /// Número da série exibida no controle de carga:
+    /// - Durante o descanso, exibe a série que acabou de passar (`lastCompletedSetNumber`)
+    /// - Durante a execução, exibe a série atual em andamento (`currentSetNumber`)
+    var displayedAdjustableSetNumber: Int {
+        if isResting && lastCompletedSetNumber > 0 {
+            return lastCompletedSetNumber
+        }
+        return max(1, currentSetNumber)
+    }
+    
+    /// Peso exibido para ajuste (série que passou durante o descanso, ou série atual durante a execução)
+    var displayedAdjustableWeightKg: Double {
+        if isResting && lastCompletedSetNumber > 0 {
+            return lastCompletedSetWeightKg
+        }
+        return currentSetWeightKg
+    }
+    
+    var displayedAdjustableLabel: String {
+        let formatted = WorkoutExerciseItem.formatWeightKg(displayedAdjustableWeightKg)
+        if isResting && lastCompletedSetNumber > 0 {
+            return "Série \(lastCompletedSetNumber) feita: \(formatted)"
+        }
+        return "Carga Série \(displayedAdjustableSetNumber): \(formatted)"
+    }
+    
     init(context: ActivityViewContext<WorkoutActivityAttributes>) {
-        if let shared = SharedWorkoutSessionManager.shared.loadSession() {
+        // Prioriza o context.state entregue em tempo real pelo ActivityKit
+        if !context.state.currentExerciseName.isEmpty || context.state.totalSetsTotal > 0 {
+            self.title = context.state.workoutTitle
+            self.exerciseName = context.state.currentExerciseName.isEmpty ? "Treino" : context.state.currentExerciseName
+            self.currentSetNumber = max(1, context.state.currentSetNumber)
+            self.totalSetsForExercise = max(1, context.state.totalSetsForExercise)
+            self.completedSetsTotal = context.state.completedSetsTotal
+            self.totalSetsTotal = context.state.totalSetsTotal
+            self.caloriesBurned = context.state.caloriesBurned
+            self.workoutStartDate = context.state.workoutStartDate
+            self.isResting = context.state.isResting
+            self.restStartDate = context.state.restStartDate
+            self.restEndDate = context.state.restEndDate
+            self.restDurationSeconds = context.state.restDurationSeconds
+            self.isAllCompleted = context.state.isAllCompleted
+            self.currentSetWeightKg = context.state.currentSetWeightKg
+            self.lastCompletedSetNumber = context.state.lastCompletedSetNumber
+            self.lastCompletedSetWeightKg = context.state.lastCompletedSetWeightKg > 0 ? context.state.lastCompletedSetWeightKg : context.state.currentSetWeightKg
+            self.lastCompletedExerciseName = context.state.lastCompletedExerciseName.isEmpty ? self.exerciseName : context.state.lastCompletedExerciseName
+            self.weightStepKg = context.state.weightStepKg > 0 ? context.state.weightStepKg : SharedWorkoutSessionManager.shared.currentWeightStepKg
+        } else if let shared = SharedWorkoutSessionManager.shared.loadSession() {
             self.title = shared.title
-            self.exerciseName = shared.currentExercise?.name ?? (context.state.currentExerciseName.isEmpty ? "Treino" : context.state.currentExerciseName)
-            let maxSets = shared.currentExercise?.sets ?? context.state.totalSetsForExercise
-            // Série ativa correta: currentSetIndex + 1 (evita mostrar a série anterior)
+            self.exerciseName = shared.currentExercise?.name ?? "Treino"
+            let maxSets = shared.currentExercise?.sets ?? 3
             self.currentSetNumber = min(maxSets, max(1, shared.currentSetIndex + 1))
             self.totalSetsForExercise = maxSets
             self.completedSetsTotal = shared.completedSetsCount
@@ -48,20 +106,33 @@ struct ResolvedWorkoutLiveState {
             self.restEndDate = shared.restEndDate
             self.restDurationSeconds = shared.restDurationSeconds
             self.isAllCompleted = shared.isAllCompleted
+            
+            let curWeight = shared.currentSetWeightKg
+            let lastInfo = shared.lastCompletedSetInfo
+            self.currentSetWeightKg = curWeight
+            self.lastCompletedSetNumber = lastInfo?.setNumber ?? 0
+            self.lastCompletedSetWeightKg = lastInfo?.weightKg ?? curWeight
+            self.lastCompletedExerciseName = lastInfo?.exerciseName ?? self.exerciseName
+            self.weightStepKg = SharedWorkoutSessionManager.shared.currentWeightStepKg
         } else {
             self.title = context.state.workoutTitle
-            self.exerciseName = context.state.currentExerciseName.isEmpty ? "Treino" : context.state.currentExerciseName
-            self.currentSetNumber = context.state.currentSetNumber
-            self.totalSetsForExercise = context.state.totalSetsForExercise
-            self.completedSetsTotal = context.state.completedSetsTotal
-            self.totalSetsTotal = context.state.totalSetsTotal
-            self.caloriesBurned = context.state.caloriesBurned
-            self.workoutStartDate = context.state.workoutStartDate
-            self.isResting = context.state.isResting
-            self.restStartDate = context.state.restStartDate
-            self.restEndDate = context.state.restEndDate
-            self.restDurationSeconds = context.state.restDurationSeconds
-            self.isAllCompleted = context.state.isAllCompleted
+            self.exerciseName = "Treino"
+            self.currentSetNumber = 1
+            self.totalSetsForExercise = 3
+            self.completedSetsTotal = 0
+            self.totalSetsTotal = 12
+            self.caloriesBurned = 0
+            self.workoutStartDate = Date()
+            self.isResting = false
+            self.restStartDate = nil
+            self.restEndDate = nil
+            self.restDurationSeconds = 90
+            self.isAllCompleted = false
+            self.currentSetWeightKg = 0
+            self.lastCompletedSetNumber = 0
+            self.lastCompletedSetWeightKg = 0
+            self.lastCompletedExerciseName = "Treino"
+            self.weightStepKg = 2.0
         }
     }
 }
@@ -88,13 +159,22 @@ public struct WorkoutLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 5) {
                         Image(systemName: state.isResting ? "timer" : "dumbbell.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 11.5, weight: .bold))
                             .foregroundColor(state.isResting ? restOrange : accentEmerald)
                         
                         Text(state.isResting ? "DESCANSO" : "TREINO")
                             .font(.system(size: 11, weight: .heavy, design: .rounded))
                             .foregroundColor(state.isResting ? restOrange : accentEmerald)
+                        
+                        Text("\(state.completedSetsTotal)/\(state.totalSetsTotal)")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.white.opacity(0.14))
+                            .clipShape(Capsule())
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 4)
                     .padding(.top, 2)
@@ -125,49 +205,121 @@ public struct WorkoutLiveActivity: Widget {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 2)
+                    .padding(.trailing, 4)
                     .padding(.top, 2)
                 }
                 
-                // Bottom: CONTEÚDO PRINCIPAL E BOTÕES INTERATIVOS
+                // Bottom: CONTEÚDO EXPANDIDO COMPACTO COM AJUSTES FINOS DIRETOS (-1kg | -0.5 | +0.5 | +1kg)
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Linha 1: Exercício Atual e Série
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(state.exerciseName.isEmpty ? state.title : state.exerciseName)
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                
-                                if state.isAllCompleted {
-                                    Text("Todas as séries finalizadas com sucesso!")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(accentEmerald)
-                                } else if state.isResting {
-                                    Text("Próxima: Série \(state.currentSetNumber) de \(state.totalSetsForExercise)")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(restOrange.opacity(0.9))
-                                } else {
-                                    Text("Série \(state.currentSetNumber) de \(state.totalSetsForExercise) • ~\(Int(state.caloriesBurned)) kcal")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            // Pílula com progresso geral de séries
-                            Text("\(state.completedSetsTotal)/\(state.totalSetsTotal)")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Linha 1: Exercício (Esquerda) + Status da Série / Descanso (Direita)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(state.exerciseName.isEmpty ? state.title : state.exerciseName)
+                                .font(.system(size: 13.5, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(Capsule())
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            if state.isAllCompleted {
+                                Text("Treino finalizado!")
+                                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                    .foregroundColor(accentEmerald)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            } else if state.isResting {
+                                Text("Próx: S\(state.currentSetNumber)/\(state.totalSetsForExercise) (\(WorkoutExerciseItem.formatWeightKg(state.currentSetWeightKg)))")
+                                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                    .foregroundColor(restOrange.opacity(0.95))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            } else {
+                                Text("Série \(state.currentSetNumber)/\(state.totalSetsForExercise) • ~\(Int(state.caloriesBurned)) kcal")
+                                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
                         }
                         
-                        // Linha 2: Botões Interativos (Operação 100% autônoma pela Ilha sem abrir o app)
+                        // Linha 2: Carga da Série + Botões Diretos de Precisão (-1kg, -0.5, +0.5, +1kg)
+                        HStack(spacing: 5) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "scalemass.fill")
+                                    .font(.system(size: 9.5, weight: .bold))
+                                    .foregroundColor(state.isResting ? restOrange : accentEmerald)
+                                
+                                Text(state.isResting && state.lastCompletedSetNumber > 0 ? "S\(state.displayedAdjustableSetNumber) feita:" : "Série \(state.displayedAdjustableSetNumber):")
+                                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.78))
+                                    .lineLimit(1)
+                                
+                                Text(WorkoutExerciseItem.formatWeightKg(state.displayedAdjustableWeightKg))
+                                    .font(.system(size: 12, weight: .black, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            
+                            Spacer(minLength: 4)
+                            
+                            HStack(spacing: 4) {
+                                Button(intent: DecreaseOneKgLiveIntent()) {
+                                    Text("-1kg")
+                                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4.5)
+                                        .background(Color(white: 0.22))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .tint(Color(white: 0.22))
+                                
+                                Button(intent: DecreaseHalfKgLiveIntent()) {
+                                    Text("-0.5")
+                                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4.5)
+                                        .background(Color(white: 0.28))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .tint(Color(white: 0.28))
+                                
+                                Button(intent: IncreaseHalfKgLiveIntent()) {
+                                    Text("+0.5")
+                                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4.5)
+                                        .background(accentEmerald.opacity(0.86))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .tint(accentEmerald.opacity(0.86))
+                                
+                                Button(intent: IncreaseOneKgLiveIntent()) {
+                                    Text("+1kg")
+                                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4.5)
+                                        .background(accentEmerald)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .tint(accentEmerald)
+                            }
+                            .fixedSize(horizontal: true, vertical: true)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Capsule())
+                        
+                        // Linha 2: Botões Interativos Principais
                         HStack(spacing: 8) {
                             if state.isAllCompleted {
                                 Button(intent: FinishWorkoutLiveIntent()) {
@@ -175,18 +327,17 @@ public struct WorkoutLiveActivity: Widget {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 13, weight: .bold))
                                         Text("Finalizar e Salvar Treino")
-                                            .font(.system(size: 13, weight: .bold))
+                                            .font(.system(size: 12.5, weight: .bold))
                                     }
                                     .foregroundColor(.black)
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
+                                    .padding(.vertical, 7)
                                     .background(accentEmerald)
                                     .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                                 .tint(accentEmerald)
                             } else if state.isResting {
-                                // Durante o Descanso: +30s e Iniciar Próxima Série
                                 Button(intent: AddRestTimeLiveIntent()) {
                                     HStack(spacing: 3) {
                                         Image(systemName: "plus")
@@ -196,7 +347,7 @@ public struct WorkoutLiveActivity: Widget {
                                     }
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
+                                    .padding(.vertical, 7)
                                     .background(Color(white: 0.22))
                                     .clipShape(Capsule())
                                 }
@@ -212,14 +363,13 @@ public struct WorkoutLiveActivity: Widget {
                                     }
                                     .foregroundColor(.black)
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
+                                    .padding(.vertical, 7)
                                     .background(accentEmerald)
                                     .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                                 .tint(accentEmerald)
                             } else {
-                                // Durante a Execução: Concluir Série Atual com 1 toque
                                 Button(intent: CompleteSetLiveIntent()) {
                                     HStack(spacing: 6) {
                                         Image(systemName: "checkmark.circle.fill")
@@ -229,7 +379,7 @@ public struct WorkoutLiveActivity: Widget {
                                     }
                                     .foregroundColor(.black)
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
+                                    .padding(.vertical, 7)
                                     .background(accentEmerald)
                                     .clipShape(Capsule())
                                 }
@@ -238,9 +388,9 @@ public struct WorkoutLiveActivity: Widget {
                                 
                                 Button(intent: FinishWorkoutLiveIntent()) {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 12, weight: .bold))
+                                        .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(.white.opacity(0.85))
-                                        .frame(width: 34, height: 34)
+                                        .frame(width: 30, height: 30)
                                         .background(Color(white: 0.20))
                                         .clipShape(Circle())
                                 }
@@ -249,8 +399,9 @@ public struct WorkoutLiveActivity: Widget {
                             }
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 6)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
                 }
             } compactLeading: {
                 Image(systemName: state.isResting ? "timer" : "dumbbell.fill")
@@ -317,7 +468,7 @@ struct WorkoutLockScreenView: View {
     private let restOrange = Color(red: 1.0, green: 0.58, blue: 0.0)
     
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // Header
             HStack {
                 HStack(spacing: 8) {
@@ -335,8 +486,8 @@ struct WorkoutLockScreenView: View {
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                         
-                        Text(state.exerciseName.isEmpty ? "Treino em Execução" : state.exerciseName)
-                            .font(.system(size: 13, weight: .medium))
+                        Text("\(state.exerciseName.isEmpty ? "Treino" : state.exerciseName) • Série \(state.currentSetNumber)/\(state.totalSetsForExercise) (\(WorkoutExerciseItem.formatWeightKg(state.currentSetWeightKg)))")
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
@@ -387,6 +538,75 @@ struct WorkoutLockScreenView: View {
                 }
             }
             .frame(height: 6)
+            
+            // Faixa de Ajuste Fino de Carga da Série (-1kg | -0.5 | +0.5 | +1kg) na Tela Bloqueada
+            HStack(spacing: 6) {
+                Image(systemName: "scalemass.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(accentEmerald)
+                
+                Text(state.displayedAdjustableLabel)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Spacer(minLength: 4)
+                
+                HStack(spacing: 4) {
+                    Button(intent: DecreaseOneKgLiveIntent()) {
+                        Text("-1kg")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color(white: 0.22))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .tint(Color(white: 0.22))
+                    
+                    Button(intent: DecreaseHalfKgLiveIntent()) {
+                        Text("-0.5")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color(white: 0.28))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .tint(Color(white: 0.28))
+                    
+                    Button(intent: IncreaseHalfKgLiveIntent()) {
+                        Text("+0.5")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(accentEmerald.opacity(0.86))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .tint(accentEmerald.opacity(0.86))
+                    
+                    Button(intent: IncreaseOneKgLiveIntent()) {
+                        Text("+1kg")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(accentEmerald)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .tint(accentEmerald)
+                }
+                .fixedSize(horizontal: true, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             
             // CONTROLES INTERATIVOS NA TELA BLOQUEADA
             HStack(spacing: 10) {

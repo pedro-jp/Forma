@@ -27,6 +27,7 @@ struct ProfileView: View {
 
     @ObservedObject private var authManager = AuthManager.shared
     @ObservedObject private var syncManager = BackendSyncManager.shared
+    @ObservedObject private var realtimeSocket = AccountRealtimeSocketManager.shared
 
     var body: some View {
         NavigationStack {
@@ -54,6 +55,7 @@ struct ProfileView: View {
 
                         VStack(alignment: .leading, spacing: FormaTheme.Spacing.sectionGap) {
                             profileHeaderCard(profile: bindableProfile)
+                            accountTierCard
                             fitnessGoalCard(profile: bindableProfile)
 
                             ProfileTargetWeightCard(
@@ -91,7 +93,7 @@ struct ProfileView: View {
                                     FormaDataStore.shared.recalculateProfileWithFullContext(profile: bindableProfile, in: modelContext)
                                     try? modelContext.save()
                                     FormaDataStore.shared.syncTodayData()
-                                    showToast("Metas recalculadas pela Inteligência Forma!")
+                                    showToast(authManager.isPro ? "Metas recalculadas pela Inteligência Forma!" : "Metas recalculadas com base nas suas medidas!")
                                 }
                             )
 
@@ -182,6 +184,85 @@ struct ProfileView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var accountTierCard: some View {
+        FormaCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(authManager.isPro ? AnyShapeStyle(FormaTheme.Colors.aiGradient) : AnyShapeStyle(FormaTheme.Colors.brandSoft))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: authManager.isPro ? "sparkles" : "leaf.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(authManager.isPro ? .white : FormaTheme.Colors.brand)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(authManager.isPro ? "Forma Pro" : "Camada Essencial")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                            Text(authManager.isPro ? "PRO" : "FREE")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .foregroundStyle(authManager.isPro ? .white : FormaTheme.Colors.brand)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(
+                                    authManager.isPro
+                                        ? AnyShapeStyle(FormaTheme.Colors.aiGradient)
+                                        : AnyShapeStyle(FormaTheme.Colors.brandSoft)
+                                )
+                                .clipShape(Capsule())
+
+                            if realtimeSocket.isConnected {
+                                HStack(spacing: 4) {
+                                    Circle()
+                                        .fill(FormaTheme.Colors.energyGreen)
+                                        .frame(width: 6, height: 6)
+                                    Text("Ao vivo")
+                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(FormaTheme.Colors.energyGreen)
+                                }
+                                .padding(.leading, 2)
+                            }
+                        }
+
+                        Text(authManager.isPro ? "Todas as funções de Inteligência Forma ativas" : "Visual simplificado e direto para o dia a dia")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button {
+                        Task { @MainActor in
+                            await syncManager.sync(context: modelContext, forcePull: true)
+                            showToast("Camada da conta atualizada (\(authManager.accountTier.displayName))")
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(Color.primary.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text(
+                    authManager.isPro
+                        ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e diagnóstico completo de evolução."
+                        : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. O tipo da conta é definido pelo painel administrativo."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

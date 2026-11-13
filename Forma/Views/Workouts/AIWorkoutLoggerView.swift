@@ -17,11 +17,13 @@ struct AIWorkoutLoggerView: View {
     @ObservedObject private var geminiService = GeminiAIService.shared
     @ObservedObject private var voiceService = VoiceRecognitionService.shared
     @ObservedObject private var aiConsent = AIDataConsentManager.shared
+    @ObservedObject private var authManager = AuthManager.shared
     
     @State private var inputText: String = ""
     @State private var analyzedWorkout: AIExtractedWorkout? = nil
     @State private var errorMessage: String? = nil
     @State private var showAIConsentSheet: Bool = false
+    @State private var workoutAnalysisTask: Task<Void, Never>? = nil
     
     // Estados de Ações
     @State private var isSavedAsRoutine: Bool = false
@@ -80,7 +82,16 @@ struct AIWorkoutLoggerView: View {
                 }
             }
             .sheet(item: $selectedCatalogItemForDetail) { item in
-                ExerciseDetailView(item: item)
+                ExerciseDetailView(
+                    item: item,
+                    onSelectItem: exerciseIndexToLink != nil ? { chosen in
+                        if let idx = exerciseIndexToLink, var w = analyzedWorkout, idx < w.exercises.count {
+                            w.exercises[idx].animationId = chosen.id
+                            analyzedWorkout = w
+                        }
+                        exerciseIndexToLink = nil
+                    } : nil
+                )
             }
             .sheet(isPresented: $showCatalogSheet) {
                 ExerciseCatalogSheet { selectedItem in
@@ -99,6 +110,22 @@ struct AIWorkoutLoggerView: View {
             .onChange(of: voiceService.recognizedText) { _, newText in
                 if voiceService.listeningMode == .workout && !newText.isEmpty {
                     inputText = newText
+                }
+            }
+            .onChange(of: authManager.accountTier) { _, newTier in
+                if newTier == .free {
+                    workoutAnalysisTask?.cancel()
+                    voiceService.stopListening(shouldAnalyze: false)
+                    showAIConsentSheet = false
+                    showActiveSessionSheet = false
+                    analyzedWorkout = nil
+                    dismiss()
+                }
+            }
+            .onDisappear {
+                workoutAnalysisTask?.cancel()
+                if voiceService.listeningMode == .workout {
+                    voiceService.stopListening(shouldAnalyze: false)
                 }
             }
             .fullScreenCover(isPresented: $showActiveSessionSheet) {
@@ -154,6 +181,11 @@ struct AIWorkoutLoggerView: View {
             Text("DESCREVA SEU TREINO OU EXERCÍCIO")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.secondary)
+            
+            if voiceService.isRecording && voiceService.listeningMode == .workout {
+                FormaVoiceWaveformView(voiceService: voiceService)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             
             HStack(alignment: .top, spacing: 10) {
                 TextField("Ex: 'Supino reto 4x10 com 30kg/lado, crucifixo inclinado com halteres de 20kg e tríceps corda'", text: $inputText, axis: .vertical)
@@ -474,19 +506,43 @@ struct AIWorkoutLoggerView: View {
     }
     
     private func exercisePreviewRow(exercise: WorkoutExerciseItem, index: Int) -> some View {
-        let catalogItem = ExerciseCatalog.shared.item(withId: exercise.animationId) ?? ExerciseCatalog.shared.findBestMatch(for: exercise.name)
-        
+        let catalogItem = ExerciseCatalog.shared.item(withId: exercise.animationId)
+            ?? ExerciseCatalog.shared.guaranteedMatch(for: exercise.name, targetMuscle: exercise.targetMuscle)
+
         return HStack(spacing: 12) {
+            // Miniatura viva do vídeo 3D de 10s associado automaticamente ao exercício criado com IA
+            Button {
+                exerciseIndexToLink = index
+                selectedCatalogItemForDetail = catalogItem
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    GIFPlayerView(videoName: catalogItem.videoName, cornerRadius: 10, showControls: false)
+                        .frame(width: 96, height: 54)
+                        .clipped()
+
+                    Text("10s")
+                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.72))
+                        .clipShape(Capsule())
+                        .padding(4)
+                }
+            }
+            .buttonStyle(.plain)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(exercise.name)
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundColor(Color("FontNormal"))
-                
-                HStack(spacing: 6) {
+                    .lineLimit(2)
+
+                HStack(spacing: 5) {
                     Text("\(exercise.sets)x \(exercise.reps)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(Color("AccentColor"))
-                    
+
                     if !exercise.suggestedWeight.isEmpty {
                         Text("•")
                             .foregroundColor(.secondary)
@@ -494,43 +550,52 @@ struct AIWorkoutLoggerView: View {
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
-                    
-                    if !exercise.targetMuscle.isEmpty {
-                        Text("•")
-                            .foregroundColor(.secondary)
-                        Text(exercise.targetMuscle)
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
+                }
+
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 5, height: 5)
+                    Text(catalogItem.name)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
             }
-            
-            Spacer()
-            
-            // Botão de Info do Exercício (Abre GIF em alta resolução e biomecânica)
-            Button {
-                if let item = catalogItem {
-                    selectedCatalogItemForDetail = item
-                } else {
+
+            Spacer(minLength: 4)
+
+            VStack(spacing: 6) {
+                Button {
+                    exerciseIndexToLink = index
+                    selectedCatalogItemForDetail = catalogItem
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.tv.fill")
+                            .font(.system(size: 12))
+                        Text("Vídeo")
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    .foregroundColor(Color("AccentColor"))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color("AccentColor").opacity(0.1))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
                     exerciseIndexToLink = index
                     showCatalogSheet = true
+                } label: {
+                    Text("Trocar")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "info.circle.fill")
-                        .font(.system(size: 16))
-                    Text("Info")
-                        .font(.system(size: 12, weight: .bold))
-                }
-                .foregroundColor(Color("AccentColor"))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color("AccentColor").opacity(0.1))
-                .clipShape(Capsule())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
-        .padding(12)
+        .padding(10)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -581,27 +646,35 @@ struct AIWorkoutLoggerView: View {
     }
     
     private func analyzeWorkoutText() {
+        guard authManager.isPro else {
+            dismiss()
+            return
+        }
         guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         if !aiConsent.hasGrantedConsent {
-            showAIConsentSheet = true
-            return
+            aiConsent.setConsent(true)
         }
         performWorkoutAnalysis()
     }
 
     private func performWorkoutAnalysis() {
-        guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard authManager.isPro, !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        workoutAnalysisTask?.cancel()
         errorMessage = nil
         isSavedAsRoutine = false
         isLoggedToHistory = false
         
-        Task {
+        workoutAnalysisTask = Task {
             do {
                 let result = try await geminiService.analyzeWorkout(description: inputText, userWeight: userWeight)
+                guard !Task.isCancelled, authManager.isPro else { return }
                 withAnimation(.spring(duration: 0.35)) {
                     self.analyzedWorkout = result
                 }
+            } catch is CancellationError {
+                return
             } catch {
+                guard !Task.isCancelled, authManager.isPro else { return }
                 errorMessage = error.localizedDescription
             }
         }

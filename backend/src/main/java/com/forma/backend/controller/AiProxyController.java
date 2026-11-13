@@ -61,7 +61,8 @@ public class AiProxyController {
         @RequestBody AiDto.InitialGoalsAiRequest request
     ) {
         // Permite cálculo de metas iniciais mesmo se a chave da IA estiver indisponível (fallback fisiológico integrado)
-        UUID userId = authContextResolver.requireActiveUser(authHeader, fallbackUserId).getId();
-        return ResponseEntity.ok(geminiAiProxyService.suggestInitialGoals(userId, request));
+        var user = authContextResolver.requireActiveUser(authHeader, fallbackUserId);
+        boolean allowCloudAi = user.isPro() && !user.isAiBlocked();
+        return ResponseEntity.ok(geminiAiProxyService.suggestInitialGoals(user.getId(), request, allowCloudAi));
     }
 }

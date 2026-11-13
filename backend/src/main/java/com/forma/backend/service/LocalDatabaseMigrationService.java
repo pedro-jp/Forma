@@ -245,6 +245,11 @@ public class LocalDatabaseMigrationService implements ApplicationRunner {
                         target.setDailyAiLimit(dailyLimit);
                         updated = true;
                     }
+                    String tier = getString(rs, cols, "account_tier");
+                    if (tier != null && !tier.isBlank() && !"PRO".equalsIgnoreCase(target.getAccountTier()) && "PRO".equalsIgnoreCase(tier.trim())) {
+                        target.setAccountTier("PRO");
+                        updated = true;
+                    }
                     if (updated) {
                         userRepository.save(target);
                     }
@@ -257,6 +262,7 @@ public class LocalDatabaseMigrationService implements ApplicationRunner {
                 u.setPasswordHash(getString(rs, cols, "password_hash"));
                 u.setName(getStringOrDefault(rs, cols, "name", "Usuário"));
                 u.setAuthProvider(getStringOrDefault(rs, cols, "auth_provider", "EMAIL"));
+                u.setAccountTier(getStringOrDefault(rs, cols, "account_tier", "FREE"));
                 u.setProviderId(getString(rs, cols, "provider_id"));
                 Instant createdAt = getInstant(rs, cols, "created_at");
                 u.setCreatedAt(createdAt != null ? createdAt : Instant.now());

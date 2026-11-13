@@ -81,6 +81,18 @@ public class AuthDto {
         String email,
         String name,
         String authProvider,
+        String accountTier,
         SyncDto.ProfileDto profile
-    ) {}
+    ) {
+        public AuthResponse(
+            String token,
+            UUID userId,
+            String email,
+            String name,
+            String authProvider,
+            SyncDto.ProfileDto profile
+        ) {
+            this(token, userId, email, name, authProvider, "FREE", profile);
+        }
+    }
 }

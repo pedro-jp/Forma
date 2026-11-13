@@ -21,6 +21,11 @@ public final class AppNavigationRouter: ObservableObject {
     
     private init() {}
     
+    public func cutAllAIFlowsForFreeTier() {
+        showAIWorkoutSheet = false
+        showAIFoodSheet = false
+    }
+
     public func handleDeepLink(_ url: URL) {
         guard let rawScheme = url.scheme?.lowercased(),
               rawScheme == "forma" else { return }
@@ -35,7 +40,7 @@ public final class AppNavigationRouter: ObservableObject {
             showVoiceFoodSheet = true
         case "ai-workout", "gemini-workout", "workout":
             selectedTab = "treinos"
-            showAIWorkoutSheet = true
+            showAIWorkoutSheet = AuthManager.shared.isPro
         case "open", "inicio":
             selectedTab = "inicio"
         default:

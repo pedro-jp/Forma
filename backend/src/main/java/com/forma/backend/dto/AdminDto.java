@@ -51,8 +51,64 @@ public class AdminDto {
         Instant createdAt,
         Instant lastLoginAt,
         Instant lastSyncedAt,
-        Instant forceResetAt
-    ) {}
+        Instant forceResetAt,
+        String accountTier
+    ) {
+        public UserSummaryDto(
+            UUID id,
+            String email,
+            String name,
+            String authProvider,
+            String status,
+            String pausedReason,
+            boolean aiBlocked,
+            Integer dailyAiLimit,
+            long todayAiRequests,
+            long totalAiRequests,
+            long foodsCount,
+            long workoutsCount,
+            long routinesCount,
+            long watersCount,
+            long weightsCount,
+            long analysesCount,
+            String goal,
+            Double currentWeight,
+            Double targetWeight,
+            Double targetCalorieIntake,
+            Instant createdAt,
+            Instant lastLoginAt,
+            Instant lastSyncedAt,
+            Instant forceResetAt
+        ) {
+            this(
+                id,
+                email,
+                name,
+                authProvider,
+                status,
+                pausedReason,
+                aiBlocked,
+                dailyAiLimit,
+                todayAiRequests,
+                totalAiRequests,
+                foodsCount,
+                workoutsCount,
+                routinesCount,
+                watersCount,
+                weightsCount,
+                analysesCount,
+                goal,
+                currentWeight,
+                targetWeight,
+                targetCalorieIntake,
+                createdAt,
+                lastLoginAt,
+                lastSyncedAt,
+                forceResetAt,
+                "FREE"
+            );
+        }
+    }
 
     public record UserDetailDto(
         UserSummaryDto user,
@@ -66,8 +122,18 @@ public class AdminDto {
         String name,
         String email,
         String password,
-        Integer dailyAiLimit
-    ) {}
+        Integer dailyAiLimit,
+        String accountTier
+    ) {
+        public CreateUserRequest(
+            String name,
+            String email,
+            String password,
+            Integer dailyAiLimit
+        ) {
+            this(name, email, password, dailyAiLimit, "FREE");
+        }
+    }
 
     public record UpdateUserRequest(
         String name,
@@ -79,7 +145,39 @@ public class AdminDto {
         Double heightMeters,
         Double targetCalorieIntake,
         Double targetCalorieBurn,
-        Integer targetWaterMilliliters
+        Integer targetWaterMilliliters,
+        String accountTier
+    ) {
+        public UpdateUserRequest(
+            String name,
+            String email,
+            String newPassword,
+            String goal,
+            Double currentWeight,
+            Double targetWeight,
+            Double heightMeters,
+            Double targetCalorieIntake,
+            Double targetCalorieBurn,
+            Integer targetWaterMilliliters
+        ) {
+            this(
+                name,
+                email,
+                newPassword,
+                goal,
+                currentWeight,
+                targetWeight,
+                heightMeters,
+                targetCalorieIntake,
+                targetCalorieBurn,
+                targetWaterMilliliters,
+                null
+            );
+        }
+    }
+
+    public record UserTierRequest(
+        String accountTier
     ) {}
 
     public record UserStatusRequest(

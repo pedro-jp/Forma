@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct HomeDailyLogsSection: View {
+    var isPro: Bool = false
     let foodsToday: [FoodEntry]
     let workoutsToday: [WorkoutEntry]
     let steps: Double
@@ -53,21 +54,23 @@ struct HomeDailyLogsSection: View {
                             .fixedSize(horizontal: true, vertical: false)
                     }
 
-                    Button(action: onOpenCameraTap) {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(FormaTheme.Colors.brand)
-                            .frame(width: 30, height: 30)
-                            .background(FormaTheme.Colors.brandSoft)
-                            .clipShape(Circle())
+                    if isPro {
+                        Button(action: onOpenCameraTap) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(FormaTheme.Colors.brand)
+                                .frame(width: 30, height: 30)
+                                .background(FormaTheme.Colors.brandSoft)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     Button(action: onAddMealTap) {
                         HStack(spacing: 4) {
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 11))
-                            Text("Refeição")
+                            Image(systemName: isPro ? "mic.fill" : "plus")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(isPro ? "Refeição" : "Adicionar")
                                 .font(.caption.weight(.bold))
                                 .lineLimit(1)
                         }
@@ -85,8 +88,10 @@ struct HomeDailyLogsSection: View {
                     FormaEmptyState(
                         icon: "fork.knife",
                         title: "Nenhuma refeição registrada hoje",
-                        subtitle: "Fotografe seu prato, fale pelo microfone ou digite o que comeu.",
-                        actionTitle: "+ Registrar Refeição",
+                        subtitle: isPro
+                            ? "Fotografe seu prato, fale pelo microfone ou digite o que comeu."
+                            : "Busque alimentos rapidamente com cálculo automático pela Tabela TACO.",
+                        actionTitle: isPro ? "+ Registrar Refeição" : "+ Adicionar Alimento",
                         onAction: onAddMealTap
                     )
                 } else {
@@ -267,7 +272,12 @@ struct HomeDailyLogsSection: View {
 
     private var quickActionsRow: some View {
         HStack(spacing: 10) {
-            HomeQuickActionButton(title: "+ Refeição", icon: "mic.fill", color: FormaTheme.Colors.brand, action: onAddMealTap)
+            HomeQuickActionButton(
+                title: isPro ? "+ Refeição" : "+ Alimento",
+                icon: isPro ? "mic.fill" : "fork.knife",
+                color: FormaTheme.Colors.brand,
+                action: onAddMealTap
+            )
             HomeQuickActionButton(title: "+ Treino", icon: "dumbbell.fill", color: FormaTheme.Colors.energyGreen, action: onAddWorkoutTap)
             HomeQuickActionButton(title: "+ Pesagem", icon: "scalemass.fill", color: .blue, action: onLogWeightTap)
         }

@@ -16,8 +16,11 @@ struct WorkoutsView: View {
 
     @State private var showAddWorkout: Bool = false
     @State private var showAIWorkout: Bool = false
+    @State private var showManualRoutineBuilder: Bool = false
+    @State private var showCatalogSheet: Bool = false
     @State private var selectedExerciseForDetail: ExerciseCatalogItem? = nil
     @State private var activeRoutineToTrain: WorkoutRoutine? = nil
+    @ObservedObject private var authManager = AuthManager.shared
 
     private var sortedRoutines: [WorkoutRoutine] {
         routines.filter { $0.isFavorite } + routines.filter { !$0.isFavorite }
@@ -77,8 +80,13 @@ struct WorkoutsView: View {
                     weeklyConsistencyCard
                         .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
 
-                    aiAssistantBanner
-                        .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                    if authManager.isPro {
+                        aiAssistantBanner
+                            .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                    } else {
+                        catalogQuickCard
+                            .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                    }
 
                     routinesSection
 
@@ -93,6 +101,14 @@ struct WorkoutsView: View {
             .onAppear {
                 healthVM.loadHealthData()
                 FormaDataStore.shared.syncExternalHealthWorkoutsInBackground(in: modelContext)
+                if !authManager.isPro {
+                    showAIWorkout = false
+                }
+            }
+            .onChange(of: authManager.accountTier) { _, newTier in
+                if newTier == .free {
+                    showAIWorkout = false
+                }
             }
             .sheet(isPresented: $showAddWorkout) {
                 AddWorkoutView()
@@ -101,6 +117,13 @@ struct WorkoutsView: View {
             .sheet(isPresented: $showAIWorkout) {
                 AIWorkoutLoggerView()
                     .environment(\.modelContext, modelContext)
+            }
+            .sheet(isPresented: $showManualRoutineBuilder) {
+                ManualRoutineBuilderView()
+                    .environment(\.modelContext, modelContext)
+            }
+            .sheet(isPresented: $showCatalogSheet) {
+                ExerciseCatalogSheet()
             }
             .sheet(item: $selectedExerciseForDetail) { item in
                 ExerciseDetailView(item: item)
@@ -265,6 +288,45 @@ struct WorkoutsView: View {
         .buttonStyle(.plain)
     }
 
+    private var catalogQuickCard: some View {
+        Button {
+            showCatalogSheet = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(FormaTheme.Colors.brandSoft)
+                        .frame(width: 46, height: 46)
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(FormaTheme.Colors.brand)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Catálogo 3D de Execução")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                        .lineLimit(1)
+                    Text("82 vídeos anatômicos com músculo alvo destacado e guia técnico")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 6)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(FormaTheme.Colors.cardSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var routinesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -279,22 +341,49 @@ struct WorkoutsView: View {
 
                 Spacer()
 
-                Button {
-                    showAIWorkout = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Nova Ficha")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                if authManager.isPro {
+                    Menu {
+                        Button {
+                            showAIWorkout = true
+                        } label: {
+                            Label("Criar com Inteligência Forma", systemImage: "sparkles")
+                        }
+                        Button {
+                            showManualRoutineBuilder = true
+                        } label: {
+                            Label("Montar Ficha Manual", systemImage: "list.clipboard")
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Nova Ficha")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(FormaTheme.Colors.brand)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(FormaTheme.Colors.brandSoft)
+                        .clipShape(Capsule())
                     }
-                    .foregroundStyle(FormaTheme.Colors.brand)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(FormaTheme.Colors.brandSoft)
-                    .clipShape(Capsule())
+                } else {
+                    Button {
+                        showManualRoutineBuilder = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Nova Ficha")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(FormaTheme.Colors.brand)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(FormaTheme.Colors.brandSoft)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
 
@@ -303,9 +392,17 @@ struct WorkoutsView: View {
                     FormaEmptyState(
                         icon: "list.clipboard",
                         title: "Nenhuma ficha salva",
-                        subtitle: "Crie sua primeira ficha com a Inteligência Forma para acompanhar séries, descanso e GIFs de execução.",
+                        subtitle: authManager.isPro
+                            ? "Crie sua primeira ficha com a Inteligência Forma ou monte manualmente com vídeos 3D de execução."
+                            : "Monte sua ficha escolhendo exercícios do catálogo 3D para acompanhar séries, cargas e descanso na Ilha Dinâmica.",
                         actionTitle: "Criar Ficha",
-                        onAction: { showAIWorkout = true }
+                        onAction: {
+                            if authManager.isPro {
+                                showAIWorkout = true
+                            } else {
+                                showManualRoutineBuilder = true
+                            }
+                        }
                     )
                 }
                 .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)

@@ -7,6 +7,9 @@ import com.forma.backend.repository.AiRequestLogRepository;
 import com.forma.backend.websocket.AdminEventPublisherService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.text.Normalizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -103,7 +106,7 @@ public class GeminiAiProxyService {
         double weight = (request.userWeight() != null && request.userWeight() > 0) ? request.userWeight() : 72.0;
         String prompt = buildWorkoutPrompt(userName, weight, request.description().trim());
 
-        return executeAndLog(
+        String raw = executeAndLog(
             userId,
             "/api/ai/analyze-workout",
             request.description().trim(),
@@ -113,6 +116,7 @@ public class GeminiAiProxyService {
             null,
             "Não foi possível gerar ou calcular o treino agora. Tente novamente em instantes."
         );
+        return ensureExerciseVideoIds(raw);
     }
 
     public String analyzeEvolution(UUID userId, AiDto.EvolutionAiRequest request) {
@@ -123,7 +127,7 @@ public class GeminiAiProxyService {
         String userName = sanitizeUserName(request.userName());
         String prompt = buildEvolutionPrompt(userName, request);
 
-        return executeAndLog(
+        String raw = executeAndLog(
             userId,
             "/api/ai/analyze-evolution",
             "Evolução " + userName,
@@ -133,9 +137,14 @@ public class GeminiAiProxyService {
             null,
             "A análise inteligente de evolução está temporariamente ocupada. Tente atualizar em alguns segundos."
         );
+        return ensureExerciseVideoIds(raw);
     }
 
     public String suggestInitialGoals(UUID userId, AiDto.InitialGoalsAiRequest request) {
+        return suggestInitialGoals(userId, request, true);
+    }
+
+    public String suggestInitialGoals(UUID userId, AiDto.InitialGoalsAiRequest request, boolean allowCloudAi) {
         if (request == null || request.currentWeight() == null || request.currentWeight() <= 20.0
             || request.heightMeters() == null || request.heightMeters() < 0.8) {
             throw new IllegalArgumentException("Informe peso atual e altura válidos para sugerir as metas.");
@@ -151,22 +160,24 @@ public class GeminiAiProxyService {
 
         Map<String, Object> baseline = computePhysiologicalInitialTargets(userName, goal, weight, heightM, request.targetWeight(), activity);
 
-        try {
-            if (!appConfigService.isAiBlocked()) {
-                String prompt = buildInitialGoalsPrompt(userName, goal, weight, heightM, request.targetWeight(), activity, baseline);
-                String result = callGeminiWithFailover(prompt, null, null);
-                if (result != null && !result.isBlank()) {
-                    JsonNode node = objectMapper.readTree(result);
-                    if (node.has("daily_calories") && node.path("daily_calories").asDouble(0) >= 1000) {
-                        long duration = System.currentTimeMillis() - startTime;
-                        logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding " + userName + " (" + goal + ")", "SUCCESS", duration);
-                        return result;
+        if (allowCloudAi) {
+            try {
+                if (!appConfigService.isAiBlocked()) {
+                    String prompt = buildInitialGoalsPrompt(userName, goal, weight, heightM, request.targetWeight(), activity, baseline);
+                    String result = callGeminiWithFailover(prompt, null, null);
+                    if (result != null && !result.isBlank()) {
+                        JsonNode node = objectMapper.readTree(result);
+                        if (node.has("daily_calories") && node.path("daily_calories").asDouble(0) >= 1000) {
+                            long duration = System.currentTimeMillis() - startTime;
+                            logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding " + userName + " (" + goal + ")", "SUCCESS", duration);
+                            return result;
+                        }
                     }
                 }
+            } catch (Exception e) {
+                long duration = System.currentTimeMillis() - startTime;
+                logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding fallback (" + e.getMessage() + ")", "FALLBACK_LOCAL", duration);
             }
-        } catch (Exception e) {
-            long duration = System.currentTimeMillis() - startTime;
-            logAiRequest(userId, "/api/ai/suggest-initial-goals", "Onboarding fallback (" + e.getMessage() + ")", "FALLBACK_LOCAL", duration);
         }
 
         try {
@@ -560,6 +571,175 @@ public class GeminiAiProxyService {
         """.formatted(userName, userName, userDescription);
     }
 
+    private static final String CANONICAL_VIDEO_IDS_GUIDE = """
+        CATÁLOGO OFICIAL DE VÍDEOS 3D DE EXECUÇÃO (10s) - OBRIGATÓRIO ASSOCIAR UM animation_id VÁLIDO EM CADA EXERCÍCIO (NUNCA null):
+        - Peitoral: supino_reto, supino_inclinado, supino_declinado, supino_reto_halteres, supino_inclinado_halteres, crucifixo, crucifixo_inclinado, crossover_polia, voador_peck_deck, flexao_de_braco, paralelas_peito
+        - Costas: puxada_alta, puxada_triangulo, puxada_articulada, pulldown_corda, pull_over, barra_fixa, chin_up, remada_curvada, remada_baixa, remada_unilateral, remada_cavalinho, levantamento_terra
+        - Pernas: agachamento_livre, agachamento_frontal, agachamento_sumo, agachamento_hack, leg_press, afundo, agachamento_bulgaro, stiff, elevacao_pelvica, cadeira_extensora, mesa_flexora, cadeira_flexora, panturrilha, panturrilha_sentado
+        - Ombros: desenvolvimento, desenvolvimento_barra, desenvolvimento_arnold, elevacao_lateral, elevacao_lateral_polia, elevacao_lateral_inclinado, elevacao_frontal, crucifixo_invertido, crucifixo_inverso_maquina, face_pull, encolhimento, remada_alta
+        - Bíceps: rosca_direta, rosca_alternada, rosca_inversa, rosca_21, rosca_martelo, rosca_martelo_corda, rosca_scott, rosca_concentrada, rosca_inclinada, rosca_spider, rosca_bayesian
+        - Tríceps: triceps_corda, triceps_barra_reta, triceps_barra_v, triceps_testa, supino_fechado, triceps_frances, triceps_frances_polia, triceps_coice, triceps_kickback_cabo, triceps_paralelas, mergulho_banco
+        - Abdômen: abdominal_crunch, abdominal_polia, abdominal_remador, abdominal_bicicleta, abdominal_declinado, abdominal_infra, elevacao_pernas_barra, roda_abdominal, prancha, prancha_lateral, vacuum_abdominal
+        """;
+
+    private static final Set<String> VALID_VIDEO_IDS = Set.of(
+        "supino_reto", "supino_inclinado", "supino_declinado", "supino_reto_halteres", "supino_inclinado_halteres",
+        "crucifixo", "crucifixo_inclinado", "crossover_polia", "voador_peck_deck", "flexao_de_braco", "paralelas_peito",
+        "puxada_alta", "puxada_triangulo", "puxada_articulada", "pulldown_corda", "pull_over", "barra_fixa", "chin_up",
+        "remada_curvada", "remada_baixa", "remada_unilateral", "remada_cavalinho", "levantamento_terra",
+        "agachamento_livre", "agachamento_frontal", "agachamento_sumo", "agachamento_hack", "leg_press", "afundo",
+        "agachamento_bulgaro", "stiff", "elevacao_pelvica", "cadeira_extensora", "mesa_flexora", "cadeira_flexora",
+        "panturrilha", "panturrilha_sentado",
+        "desenvolvimento", "desenvolvimento_barra", "desenvolvimento_arnold", "elevacao_lateral", "elevacao_lateral_polia",
+        "elevacao_lateral_inclinado", "elevacao_frontal", "crucifixo_invertido", "crucifixo_inverso_maquina", "face_pull",
+        "encolhimento", "remada_alta",
+        "rosca_direta", "rosca_alternada", "rosca_inversa", "rosca_21", "rosca_martelo", "rosca_martelo_corda",
+        "rosca_scott", "rosca_concentrada", "rosca_inclinada", "rosca_spider", "rosca_bayesian",
+        "triceps_corda", "triceps_barra_reta", "triceps_barra_v", "triceps_testa", "supino_fechado", "triceps_frances",
+        "triceps_frances_polia", "triceps_coice", "triceps_kickback_cabo", "triceps_paralelas", "mergulho_banco",
+        "abdominal_crunch", "abdominal_polia", "abdominal_remador", "abdominal_bicicleta", "abdominal_declinado",
+        "abdominal_infra", "elevacao_pernas_barra", "roda_abdominal", "prancha", "prancha_lateral", "vacuum_abdominal"
+    );
+
+    private String ensureExerciseVideoIds(String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) return rawJson;
+        try {
+            JsonNode root = objectMapper.readTree(rawJson);
+            if (!(root instanceof ObjectNode rootObj)) return rawJson;
+            boolean changed = false;
+            if (rootObj.get("exercises") instanceof ArrayNode arr) {
+                changed |= enrichExercisesArray(arr);
+            }
+            if (rootObj.get("recommended_routine") instanceof ObjectNode recObj
+                && recObj.get("exercises") instanceof ArrayNode recArr) {
+                changed |= enrichExercisesArray(recArr);
+            }
+            return changed ? objectMapper.writeValueAsString(rootObj) : rawJson;
+        } catch (Exception ignored) {
+            return rawJson;
+        }
+    }
+
+    private static boolean enrichExercisesArray(ArrayNode arr) {
+        boolean modified = false;
+        for (JsonNode item : arr) {
+            if (item instanceof ObjectNode exObj) {
+                String currentId = exObj.path("animation_id").asText("").trim().toLowerCase(Locale.ROOT);
+                if (!VALID_VIDEO_IDS.contains(currentId)) {
+                    String name = exObj.path("name").asText("");
+                    String muscle = exObj.path("target_muscle").asText("");
+                    String resolved = resolveBestVideoId(name + " " + currentId, muscle);
+                    exObj.put("animation_id", resolved);
+                    modified = true;
+                }
+            }
+        }
+        return modified;
+    }
+
+    private static String resolveBestVideoId(String rawName, String rawMuscle) {
+        String text = Normalizer.normalize((rawName + " " + rawMuscle).toLowerCase(Locale.ROOT), Normalizer.Form.NFD)
+            .replaceAll("\\p{M}", "");
+
+        // Regras específicas das variações mais ricas antes dos movimentos principais
+        if (text.contains("supino") && text.contains("inclinado") && text.contains("halter")) return "supino_inclinado_halteres";
+        if (text.contains("supino") && text.contains("inclinado")) return "supino_inclinado";
+        if (text.contains("supino") && text.contains("declinado")) return "supino_declinado";
+        if (text.contains("supino") && text.contains("halter")) return "supino_reto_halteres";
+        if (text.contains("supino") && text.contains("fechado")) return "supino_fechado";
+        if (text.contains("supino")) return "supino_reto";
+        if (text.contains("crucifixo") && (text.contains("invers") || text.contains("posterior"))) {
+            return (text.contains("maquina") || text.contains("peck") || text.contains("voador")) ? "crucifixo_inverso_maquina" : "crucifixo_invertido";
+        }
+        if (text.contains("voador") && (text.contains("invers") || text.contains("costas"))) return "crucifixo_inverso_maquina";
+        if (text.contains("crossover") || (text.contains("crucifixo") && text.contains("polia"))) return "crossover_polia";
+        if (text.contains("peck") || text.contains("voador")) return "voador_peck_deck";
+        if (text.contains("crucifixo") && text.contains("inclinado")) return "crucifixo_inclinado";
+        if (text.contains("crucifixo")) return "crucifixo";
+        if (text.contains("paralela") && text.contains("peit")) return "paralelas_peito";
+        if (text.contains("flexao")) return "flexao_de_braco";
+
+        if (text.contains("pulldown")) return "pulldown_corda";
+        if (text.contains("pull") && text.contains("over")) return "pull_over";
+        if (text.contains("chin") || (text.contains("barra fixa") && text.contains("supin"))) return "chin_up";
+        if (text.contains("barra fixa")) return "barra_fixa";
+        if (text.contains("puxada") && (text.contains("triangulo") || text.contains("neutra") || text.contains("fechada"))) return "puxada_triangulo";
+        if (text.contains("puxada") && (text.contains("articulada") || text.contains("maquina"))) return "puxada_articulada";
+        if (text.contains("puxada") || text.contains("pulley")) return "puxada_alta";
+        if (text.contains("remada") && text.contains("alta")) return "remada_alta";
+        if (text.contains("remada") && (text.contains("unilateral") || text.contains("serrote"))) return "remada_unilateral";
+        if (text.contains("remada") && text.contains("cavalinho")) return "remada_cavalinho";
+        if (text.contains("remada") && (text.contains("baixa") || text.contains("polia") || text.contains("triangulo"))) return "remada_baixa";
+        if (text.contains("remada")) return "remada_curvada";
+        if (text.contains("levantamento terra") || text.contains("deadlift")) return "levantamento_terra";
+
+        if (text.contains("leg press")) return "leg_press";
+        if (text.contains("bulgaro")) return "agachamento_bulgaro";
+        if (text.contains("afundo") || text.contains("passada") || text.contains("avanco")) return "afundo";
+        if (text.contains("agachamento") && text.contains("frontal")) return "agachamento_frontal";
+        if (text.contains("agachamento") && text.contains("sumo") || text.contains("sumo")) return "agachamento_sumo";
+        if (text.contains("hack")) return "agachamento_hack";
+        if (text.contains("agachamento")) return "agachamento_livre";
+        if (text.contains("stiff") || text.contains("romeno") || text.contains("rdl")) return "stiff";
+        if (text.contains("pelvica") || text.contains("hip thrust")) return "elevacao_pelvica";
+        if (text.contains("extensora")) return "cadeira_extensora";
+        if (text.contains("flexora") && (text.contains("sentad") || text.contains("cadeira"))) return "cadeira_flexora";
+        if (text.contains("flexora")) return "mesa_flexora";
+        if ((text.contains("panturrilha") || text.contains("gemeos") || text.contains("soleo")) && text.contains("sentad")) return "panturrilha_sentado";
+        if (text.contains("panturrilha") || text.contains("gemeos") || text.contains("soleo")) return "panturrilha";
+
+        if (text.contains("arnold")) return "desenvolvimento_arnold";
+        if (text.contains("desenvolvimento") && (text.contains("barra") || text.contains("militar"))) return "desenvolvimento_barra";
+        if (text.contains("desenvolvimento")) return "desenvolvimento";
+        if (text.contains("elevacao") && text.contains("frontal")) return "elevacao_frontal";
+        if (text.contains("elevacao") && text.contains("lateral") && text.contains("inclinad")) return "elevacao_lateral_inclinado";
+        if (text.contains("elevacao") && text.contains("lateral") && (text.contains("polia") || text.contains("cabo"))) return "elevacao_lateral_polia";
+        if (text.contains("elevacao") && text.contains("lateral")) return "elevacao_lateral";
+        if (text.contains("face pull")) return "face_pull";
+        if (text.contains("encolhimento")) return "encolhimento";
+
+        if (text.contains("bayesian")) return "rosca_bayesian";
+        if (text.contains("spider")) return "rosca_spider";
+        if (text.contains("scott")) return "rosca_scott";
+        if (text.contains("concentrad")) return "rosca_concentrada";
+        if (text.contains("rosca") && text.contains("inclinad")) return "rosca_inclinada";
+        if (text.contains("martelo") && (text.contains("corda") || text.contains("polia"))) return "rosca_martelo_corda";
+        if (text.contains("martelo")) return "rosca_martelo";
+        if (text.contains("rosca") && text.contains("inversa")) return "rosca_inversa";
+        if (text.contains("rosca") && text.contains("21")) return "rosca_21";
+        if (text.contains("rosca") && text.contains("alternad")) return "rosca_alternada";
+        if (text.contains("rosca")) return "rosca_direta";
+
+        if (text.contains("triceps") && text.contains("testa")) return "triceps_testa";
+        if (text.contains("frances") && (text.contains("polia") || text.contains("corda"))) return "triceps_frances_polia";
+        if (text.contains("frances")) return "triceps_frances";
+        if ((text.contains("coice") || text.contains("kickback")) && (text.contains("cabo") || text.contains("polia"))) return "triceps_kickback_cabo";
+        if (text.contains("coice") || text.contains("kickback")) return "triceps_coice";
+        if (text.contains("mergulho")) return "mergulho_banco";
+        if (text.contains("paralela")) return "triceps_paralelas";
+        if (text.contains("triceps") && text.contains("barra v")) return "triceps_barra_v";
+        if (text.contains("triceps") && text.contains("barra")) return "triceps_barra_reta";
+        if (text.contains("triceps")) return "triceps_corda";
+
+        if (text.contains("roda abdominal") || text.contains("ab wheel")) return "roda_abdominal";
+        if (text.contains("vacuum") || text.contains("vacuo")) return "vacuum_abdominal";
+        if (text.contains("prancha") && text.contains("lateral")) return "prancha_lateral";
+        if (text.contains("prancha")) return "prancha";
+        if (text.contains("elevacao") && text.contains("perna") && text.contains("barra")) return "elevacao_pernas_barra";
+        if (text.contains("infra") || (text.contains("elevacao") && text.contains("perna"))) return "abdominal_infra";
+        if (text.contains("abdominal") && (text.contains("polia") || text.contains("corda"))) return "abdominal_polia";
+        if (text.contains("remador")) return "abdominal_remador";
+        if (text.contains("bicicleta")) return "abdominal_bicicleta";
+        if (text.contains("abdominal") && text.contains("declinado")) return "abdominal_declinado";
+        if (text.contains("abdom") || text.contains("core")) return "abdominal_crunch";
+
+        if (text.contains("peito") || text.contains("peitoral")) return "supino_reto";
+        if (text.contains("costa") || text.contains("dorsal")) return "puxada_alta";
+        if (text.contains("ombro") || text.contains("deltoide")) return "desenvolvimento";
+        if (text.contains("biceps")) return "rosca_direta";
+        return "agachamento_livre";
+    }
+
     private static String buildWorkoutPrompt(String userName, double weight, String description) {
         return """
         Você é o treinador, fisiologista do exercício e especialista em hipertrofia do aplicativo Forma.
@@ -572,7 +752,9 @@ public class GeminiAiProxyService {
         DIRETRIZES TÉCNICAS:
         1. GASTO CALÓRICO (MET): Estime com precisão a queima calórica e duração baseando-se no peso corporal de %.1fkg.
         2. ANÁLISE DE HIPERTROFIA: Informe target_muscles, hypertrophy_focus, recommended_rest_seconds e ai_feedback.
-        3. LISTA DE EXERCÍCIOS: Estruture cada exercício com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds e animation_id snake_case se souber.
+        3. VÍDEO DE EXECUÇÃO OBRIGATÓRIO: Estruture cada exercício com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds e SEMPRE preencha "animation_id" (NUNCA retorne null) usando o ID exato do catálogo oficial de vídeos 3D abaixo.
+        
+        %s
         
         Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
         {
@@ -587,18 +769,18 @@ public class GeminiAiProxyService {
           "ai_feedback": "Feedback fisiológico objetivo",
           "exercises": [
             {
-              "name": "Nome do exercício",
+              "name": "Supino Inclinado com Halteres",
               "sets": 4,
               "reps": "8-10",
-              "suggested_weight": "Carga estimada",
-              "target_muscle": "Músculo alvo",
-              "execution_tip": "Dica de postura",
+              "suggested_weight": "22kg cada",
+              "target_muscle": "Peitoral Superior",
+              "execution_tip": "Desça controlando o alongamento e una suavemente no topo.",
               "rest_seconds": 90,
-              "animation_id": null
+              "animation_id": "supino_inclinado_halteres"
             }
           ]
         }
-        """.formatted(userName, userName, weight, description, weight);
+        """.formatted(userName, userName, weight, description, weight, CANONICAL_VIDEO_IDS_GUIDE);
     }
 
     private static String buildEvolutionPrompt(String userName, AiDto.EvolutionAiRequest request) {
@@ -643,7 +825,9 @@ public class GeminiAiProxyService {
         ARQUIVO DE LOG BRUTO:
         %s
         
-        Retorne ESTRITAMENTE um JSON válido com status_summary, calorie_diagnostic, macro_diagnostic, hydration_diagnostic, workout_suggestions (array de 3 strings), nutrition_suggestions (array de 3 strings), weekly_action_plan, suggested_targets (daily_calories, protein_grams, carbs_grams, fat_grams, water_milliliters, explanation) e recommended_routine (title, workout_type, target_muscles, hypertrophy_focus, estimated_duration_minutes, estimated_calories, recommended_rest_seconds, exercises com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds).
+        %s
+        
+        Retorne ESTRITAMENTE um JSON válido com status_summary, calorie_diagnostic, macro_diagnostic, hydration_diagnostic, workout_suggestions (array de 3 strings), nutrition_suggestions (array de 3 strings), weekly_action_plan, suggested_targets (daily_calories, protein_grams, carbs_grams, fat_grams, water_milliliters, explanation) e recommended_routine (title, workout_type, target_muscles, hypertrophy_focus, estimated_duration_minutes, estimated_calories, recommended_rest_seconds, exercises com name, sets, reps, suggested_weight, target_muscle, execution_tip, rest_seconds e animation_id OBRIGATORIAMENTE preenchido com um ID válido do catálogo acima, nunca null).
         """.formatted(
             userName, userName, userName,
             goal,
@@ -653,7 +837,8 @@ public class GeminiAiProxyService {
             contextualTdee,
             suggestedBase, currentTargetCal,
             contextualTdee, suggestedBase,
-            request.activityLogJson() != null ? request.activityLogJson() : "[]"
+            request.activityLogJson() != null ? request.activityLogJson() : "[]",
+            CANONICAL_VIDEO_IDS_GUIDE
         );
     }
 

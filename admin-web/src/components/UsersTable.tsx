@@ -31,7 +31,9 @@ interface UsersTableProps {
   onRefresh: () => void;
 }
 
-type FilterMode = 'ALL' | 'ACTIVE' | 'PAUSED' | 'AI_RESTRICTED' | 'GOOGLE' | 'APPLE' | 'EMAIL';
+type FilterMode = 'ALL' | 'PRO' | 'FREE' | 'ACTIVE' | 'PAUSED' | 'AI_RESTRICTED' | 'GOOGLE' | 'APPLE' | 'EMAIL';
+
+const isProTier = (tier?: string | null) => (tier || 'FREE').toUpperCase() === 'PRO';
 
 export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,13 +61,17 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
     const total = users.length;
     const paused = users.filter((u) => u.status === 'PAUSED').length;
     const active = total - paused;
+    const proCount = users.filter((u) => isProTier(u.accountTier)).length;
+    const freeCount = total - proCount;
     const aiRestricted = users.filter((u) => u.aiBlocked || (u.dailyAiLimit && u.dailyAiLimit > 0)).length;
-    return { total, active, paused, aiRestricted };
+    return { total, active, paused, proCount, freeCount, aiRestricted };
   }, [users]);
 
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return users.filter((u) => {
+      if (filterMode === 'PRO' && !isProTier(u.accountTier)) return false;
+      if (filterMode === 'FREE' && isProTier(u.accountTier)) return false;
       if (filterMode === 'ACTIVE' && u.status === 'PAUSED') return false;
       if (filterMode === 'PAUSED' && u.status !== 'PAUSED') return false;
       if (filterMode === 'AI_RESTRICTED' && !u.aiBlocked && !(u.dailyAiLimit && u.dailyAiLimit > 0)) return false;
@@ -127,6 +133,59 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
     } finally {
       setBusyUserId(null);
     }
+  };
+
+  const handleQuickToggleTier = async (user: UserSummary) => {
+    setBusyUserId(user.id);
+    const nextTier = isProTier(user.accountTier) ? 'FREE' : 'PRO';
+    try {
+      const resp = await fetch(`/api/admin/users/${user.id}/tier`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ accountTier: nextTier })
+      });
+      if (resp.ok) {
+        showToast(
+          nextTier === 'PRO'
+            ? `Conta de ${user.name || user.email} alterada para Forma PRO (IA completa liberada)!`
+            : `Conta de ${user.name || user.email} alterada para FREE (camada visual essencial).`
+        );
+      } else {
+        showToast('Falha ao alterar a camada da conta.', true);
+      }
+    } catch {
+      showToast('Erro de conexão ao alterar camada da conta.', true);
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const getTierBadge = (tier?: string | null) => {
+    if (isProTier(tier)) {
+      return (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '4px',
+          padding: '2px 9px', borderRadius: '999px', fontSize: '11px', fontWeight: 800,
+          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(16, 185, 129, 0.24))',
+          color: '#ddd6fe',
+          border: '1px solid rgba(167, 139, 250, 0.45)'
+        }}>
+          <Sparkles size={11} /> PRO
+        </span>
+      );
+    }
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: '4px',
+        padding: '2px 9px', borderRadius: '999px', fontSize: '11px', fontWeight: 700,
+        backgroundColor: 'rgba(148, 163, 184, 0.14)',
+        color: '#cbd5e1',
+        border: '1px solid rgba(148, 163, 184, 0.28)'
+      }}>
+        FREE • Essencial
+      </span>
+    );
   };
 
   const getProviderBadge = (provider: string) => {
@@ -223,9 +282,9 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
             <Users size={22} />
           </div>
           <div>
-            <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Central de Controle de Usuários &amp; Contas</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Central de Controle de Usuários &amp; Camadas</h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              Gerencie acesso, pause contas, controle cotas de IA, zere dados sincronizados ou exclua registros no Supabase.
+              Defina a camada de cada conta (Free Essencial ou Forma Pro com IA), pause acessos, ajuste cotas ou gerencie dados sincronizados.
             </p>
           </div>
         </div>
@@ -295,7 +354,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
       {/* Mini Summary Strip */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
         gap: '12px',
         marginBottom: '18px'
       }}>
@@ -305,6 +364,21 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
         }}>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>TOTAL DE CONTAS</div>
           <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '2px' }}>{metrics.total}</div>
+        </div>
+        <div style={{
+          padding: '12px 16px', borderRadius: '12px',
+          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.16), rgba(16, 185, 129, 0.1))',
+          border: '1px solid rgba(167, 139, 250, 0.32)'
+        }}>
+          <div style={{ fontSize: '11px', color: '#ddd6fe', fontWeight: 800 }}>✦ CAMADA PRO (IA)</div>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: '#f5f3ff', marginTop: '2px' }}>{metrics.proCount}</div>
+        </div>
+        <div style={{
+          padding: '12px 16px', borderRadius: '12px',
+          backgroundColor: 'rgba(148, 163, 184, 0.08)', border: '1px solid rgba(148, 163, 184, 0.24)'
+        }}>
+          <div style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 700 }}>🌿 CAMADA FREE</div>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: '#f1f5f9', marginTop: '2px' }}>{metrics.freeCount}</div>
         </div>
         <div style={{
           padding: '12px 16px', borderRadius: '12px',
@@ -319,13 +393,6 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
         }}>
           <div style={{ fontSize: '11px', color: '#fbbf24', fontWeight: 700 }}>⏸️ CONTAS PAUSADAS</div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: '#fef3c7', marginTop: '2px' }}>{metrics.paused}</div>
-        </div>
-        <div style={{
-          padding: '12px 16px', borderRadius: '12px',
-          backgroundColor: 'rgba(139, 92, 246, 0.08)', border: '1px solid rgba(139, 92, 246, 0.22)'
-        }}>
-          <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 700 }}>🛡️ IA BLOQUEADA / COTA</div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#f5f3ff', marginTop: '2px' }}>{metrics.aiRestricted}</div>
         </div>
       </div>
 
@@ -369,6 +436,8 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {[
             { id: 'ALL', label: 'Todos' },
+            { id: 'PRO', label: '✦ Forma Pro' },
+            { id: 'FREE', label: 'Free (Essencial)' },
             { id: 'ACTIVE', label: 'Ativos' },
             { id: 'PAUSED', label: 'Pausados' },
             { id: 'AI_RESTRICTED', label: 'IA Restrita' },
@@ -405,7 +474,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
           <thead>
             <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)', fontSize: '12px' }}>
               <th style={{ padding: '12px 12px', fontWeight: 700 }}>Usuário / Conta</th>
-              <th style={{ padding: '12px 12px', fontWeight: 700 }}>Status &amp; IA</th>
+              <th style={{ padding: '12px 12px', fontWeight: 700 }}>Camada, Status &amp; IA</th>
               <th style={{ padding: '12px 12px', fontWeight: 700 }}>Dados no Supabase</th>
               <th style={{ padding: '12px 12px', fontWeight: 700 }}>Atividade</th>
               <th style={{ padding: '12px 12px', fontWeight: 700, textAlign: 'right' }}>Controles Administrativos</th>
@@ -421,6 +490,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
             ) : (
               filteredUsers.map((u) => {
                 const isPaused = u.status === 'PAUSED';
+                const isPro = isProTier(u.accountTier);
                 const isBusy = busyUserId === u.id;
 
                 return (
@@ -458,6 +528,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
                             <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '14px' }}>
                               {u.name || 'Atleta'}
                             </span>
+                            {getTierBadge(u.accountTier)}
                             {getProviderBadge(u.authProvider)}
                           </div>
                           <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>
@@ -497,27 +568,43 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
                           </span>
                         )}
 
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          backgroundColor: u.aiBlocked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(139, 92, 246, 0.14)',
-                          color: u.aiBlocked ? '#f87171' : '#c4b5fd'
-                        }}>
-                          {u.aiBlocked ? (
-                            <>🚫 IA Bloqueada</>
-                          ) : (
-                            <>
-                              <Sparkles size={11} />
-                              IA hoje: {u.todayAiRequests ?? 0}
-                              {u.dailyAiLimit ? ` / ${u.dailyAiLimit}` : ''}
-                            </>
-                          )}
-                        </span>
+                        {!isPro ? (
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                            color: '#cbd5e1'
+                          }}>
+                            🌿 Modo Essencial (TACO + Manual)
+                          </span>
+                        ) : (
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: u.aiBlocked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(139, 92, 246, 0.14)',
+                            color: u.aiBlocked ? '#f87171' : '#c4b5fd'
+                          }}>
+                            {u.aiBlocked ? (
+                              <>🚫 IA Bloqueada</>
+                            ) : (
+                              <>
+                                <Sparkles size={11} />
+                                IA hoje: {u.todayAiRequests ?? 0}
+                                {u.dailyAiLimit ? ` / ${u.dailyAiLimit}` : ''}
+                              </>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -565,11 +652,31 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
                     {/* Col 5: Quick Action Buttons */}
                     <td style={{ padding: '14px 12px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', flexWrap: 'wrap' }}>
+                        {/* Alternar Camada FREE <-> PRO */}
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleQuickToggleTier(u)}
+                          title={
+                            isPro
+                              ? 'Mudar esta conta para a camada FREE (visual essencial simplificado sem IA)'
+                              : 'Ativar camada Forma PRO (libera todas as funções de IA para esta conta)'
+                          }
+                          style={
+                            isPro
+                              ? actionBtnStyle('#cbd5e1', 'rgba(148, 163, 184, 0.14)', 'rgba(148, 163, 184, 0.3)')
+                              : actionBtnStyle('#ddd6fe', 'rgba(139, 92, 246, 0.22)', 'rgba(167, 139, 250, 0.48)')
+                          }
+                        >
+                          <Sparkles size={13} />
+                          <span>{isPro ? 'Mudar p/ FREE' : 'Ativar PRO'}</span>
+                        </button>
+
                         {/* Editar / Inspecionar */}
                         <button
                           type="button"
                           onClick={() => setDetailTarget(u)}
-                          title="Inspecionar dados, editar metas, senha e cota de IA"
+                          title="Inspecionar dados, camada, metas, senha e cota de IA"
                           style={actionBtnStyle('#60a5fa', 'rgba(59, 130, 246, 0.14)', 'rgba(59, 130, 246, 0.3)')}
                         >
                           <Sliders size={13} />
@@ -601,21 +708,23 @@ export const UsersTable: React.FC<UsersTableProps> = ({ users, onRefresh }) => {
                           </button>
                         )}
 
-                        {/* Bloquear / Liberar IA */}
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleQuickToggleAi(u)}
-                          title={u.aiBlocked ? 'Liberar uso do Gemini AI para esta conta' : 'Bloquear apenas o Gemini AI para esta conta'}
-                          style={
-                            u.aiBlocked
-                              ? actionBtnStyle('#c4b5fd', 'rgba(139, 92, 246, 0.18)', 'rgba(139, 92, 246, 0.38)')
-                              : actionBtnStyle('#cbd5e1', 'rgba(255, 255, 255, 0.06)', 'rgba(255, 255, 255, 0.14)')
-                          }
-                        >
-                          <ShieldAlert size={13} />
-                          <span>{u.aiBlocked ? 'Liberar IA' : 'Bloquear IA'}</span>
-                        </button>
+                        {/* Bloquear / Liberar IA (relevante para contas PRO) */}
+                        {isPro && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleQuickToggleAi(u)}
+                            title={u.aiBlocked ? 'Liberar uso do Gemini AI para esta conta' : 'Bloquear apenas o Gemini AI para esta conta'}
+                            style={
+                              u.aiBlocked
+                                ? actionBtnStyle('#c4b5fd', 'rgba(139, 92, 246, 0.18)', 'rgba(139, 92, 246, 0.38)')
+                                : actionBtnStyle('#cbd5e1', 'rgba(255, 255, 255, 0.06)', 'rgba(255, 255, 255, 0.14)')
+                            }
+                          >
+                            <ShieldAlert size={13} />
+                            <span>{u.aiBlocked ? 'Liberar IA' : 'Bloquear IA'}</span>
+                          </button>
+                        )}
 
                         {/* Zerar Conta */}
                         <button

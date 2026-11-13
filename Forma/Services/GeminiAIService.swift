@@ -218,7 +218,8 @@ public struct AIExtractedWorkout: Codable, Sendable {
         self.hypertrophyFocus = (try? container.decodeIfPresent(String.self, forKey: .hypertrophyFocus)) ?? ""
         self.recommendedRestSeconds = (try? container.decodeIfPresent(Int.self, forKey: .recommendedRestSeconds)) ?? 90
         self.aiFeedback = (try? container.decodeIfPresent(String.self, forKey: .aiFeedback)) ?? ""
-        self.exercises = (try? container.decodeIfPresent([WorkoutExerciseItem].self, forKey: .exercises)) ?? []
+        let rawExercises = (try? container.decodeIfPresent([WorkoutExerciseItem].self, forKey: .exercises)) ?? []
+        self.exercises = ExerciseCatalog.shared.autoAssociateExercises(in: rawExercises)
     }
 }
 
@@ -316,7 +317,8 @@ public struct AIRecommendedRoutine: Codable, Sendable {
         self.estimatedDurationMinutes = (try? container.decodeIfPresent(Int.self, forKey: .estimatedDurationMinutes)) ?? 50
         self.estimatedCalories = (try? container.decodeIfPresent(Double.self, forKey: .estimatedCalories)) ?? 350.0
         self.recommendedRestSeconds = (try? container.decodeIfPresent(Int.self, forKey: .recommendedRestSeconds)) ?? 90
-        self.exercises = (try? container.decodeIfPresent([WorkoutExerciseItem].self, forKey: .exercises)) ?? []
+        let rawExercises = (try? container.decodeIfPresent([WorkoutExerciseItem].self, forKey: .exercises)) ?? []
+        self.exercises = ExerciseCatalog.shared.autoAssociateExercises(in: rawExercises)
     }
 }
 
@@ -498,8 +500,22 @@ public final class GeminiAIService: ObservableObject {
     // Cache em memória para evitar chamadas duplicadas
     private var mealCache: [String: AIExtractedMeal] = [:]
     private var workoutCache: [String: AIExtractedWorkout] = [:]
+    private var generationEpoch: Int = 0
     
     private init() {}
+
+    public func activateAllForProTier() {
+        lastErrorMessage = nil
+        if !AIDataConsentManager.isConsentGranted {
+            AIDataConsentManager.shared.setConsent(true)
+        }
+    }
+
+    public func cancelAndCutAllForFreeTier() {
+        generationEpoch += 1
+        isLoading = false
+        lastErrorMessage = nil
+    }
     
     // MARK: - Controle e Proteção de Rate Limit
     
@@ -741,7 +757,10 @@ public final class GeminiAIService: ObservableObject {
             body["targetWeight"] = targetWeight
         }
 
-        if AIDataConsentManager.isConsentGranted {
+        if AuthManager.shared.isPro {
+            if !AIDataConsentManager.isConsentGranted {
+                AIDataConsentManager.shared.setConsent(true)
+            }
             do {
                 let responseJson = try await sendBackendAiRequest(
                     path: "suggest-initial-goals",
@@ -802,13 +821,17 @@ public final class GeminiAIService: ObservableObject {
     // MARK: - Comunicação HTTP Segura via Backend Java (Proxy de IA)
     
     private func sendBackendAiRequest(path: String, body: [String: Any]) async throws -> String {
-        guard AIDataConsentManager.isConsentGranted else {
+        guard AuthManager.shared.isPro else {
             throw NSError(
                 domain: "GeminiAI",
                 code: 403,
-                userInfo: [NSLocalizedDescriptionKey: "Autorize o uso da IA externa nas configurações de Privacidade & Saúde para continuar."]
+                userInfo: [NSLocalizedDescriptionKey: "Os recursos de Inteligência Artificial são exclusivos da camada Forma Pro."]
             )
         }
+        if !AIDataConsentManager.isConsentGranted {
+            AIDataConsentManager.shared.setConsent(true)
+        }
+        let requestEpoch = self.generationEpoch
         let data = try await FormaAPIClient.shared.requestData(
             path: "/api/ai/\(path)",
             method: "POST",
@@ -816,6 +839,9 @@ public final class GeminiAIService: ObservableObject {
             authenticated: true,
             timeout: 60.0
         )
+        guard AuthManager.shared.isPro, self.generationEpoch == requestEpoch else {
+            throw CancellationError()
+        }
         guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
             throw FormaAPIError.serverError(statusCode: 500, message: "Resposta vazia da Inteligência Forma.")
         }

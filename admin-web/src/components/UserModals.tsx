@@ -75,6 +75,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSuc
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [accountTier, setAccountTier] = useState<'FREE' | 'PRO'>('FREE');
   const [dailyAiLimit, setDailyAiLimit] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,9 +89,10 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSuc
       const payload: Record<string, any> = {
         name: name.trim() || 'Atleta',
         email: email.trim(),
-        password
+        password,
+        accountTier
       };
-      if (dailyAiLimit.trim() && Number(dailyAiLimit) > 0) {
+      if (accountTier === 'PRO' && dailyAiLimit.trim() && Number(dailyAiLimit) > 0) {
         payload.dailyAiLimit = Number(dailyAiLimit);
       }
 
@@ -105,7 +107,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSuc
         setError(data.error || 'Falha ao criar conta.');
         return;
       }
-      onSuccess(`Conta criada com sucesso para ${data.email}!`);
+      onSuccess(`Conta ${accountTier} criada com sucesso para ${data.email}!`);
       onClose();
     } catch {
       setError('Erro de conexão ao criar usuário.');
@@ -181,16 +183,65 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSuc
             />
           </div>
           <div>
-            <label style={labelStyle}>Cota Diária de IA (opcional — vazio = sem limite)</label>
-            <input
-              type="number"
-              min={0}
-              value={dailyAiLimit}
-              onChange={(e) => setDailyAiLimit(e.target.value)}
-              placeholder="Ex: 25 requisições por dia"
-              style={inputStyle}
-            />
+            <label style={labelStyle}>Camada da Conta (definida pelo Admin • sem cobrança)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setAccountTier('FREE')}
+                style={{
+                  textAlign: 'left',
+                  padding: '12px',
+                  borderRadius: '12px',
+                  backgroundColor: accountTier === 'FREE' ? 'rgba(16, 185, 129, 0.14)' : 'rgba(15, 23, 42, 0.7)',
+                  border: `1.5px solid ${accountTier === 'FREE' ? '#10b981' : 'rgba(255, 255, 255, 0.1)'}`,
+                  color: '#f8fafc'
+                }}
+              >
+                <div style={{ fontSize: '13px', fontWeight: 800, color: accountTier === 'FREE' ? '#34d399' : '#e2e8f0' }}>
+                  🌿 Free • Essencial
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.35 }}>
+                  Tabela TACO, treinos manuais, Ilha Dinâmica e visual limpo sem IA.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAccountTier('PRO')}
+                style={{
+                  textAlign: 'left',
+                  padding: '12px',
+                  borderRadius: '12px',
+                  background: accountTier === 'PRO'
+                    ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.24), rgba(16, 185, 129, 0.14))'
+                    : 'rgba(15, 23, 42, 0.7)',
+                  border: `1.5px solid ${accountTier === 'PRO' ? '#a78bfa' : 'rgba(255, 255, 255, 0.1)'}`,
+                  color: '#f8fafc'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 800, color: accountTier === 'PRO' ? '#ddd6fe' : '#e2e8f0' }}>
+                  <Sparkles size={13} /> Forma Pro
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.35 }}>
+                  Todas as funções de IA liberadas (Foto, Voz, Treinos e Coach).
+                </div>
+              </button>
+            </div>
           </div>
+
+          {accountTier === 'PRO' && (
+            <div>
+              <label style={labelStyle}>Cota Diária de IA (opcional — vazio = sem limite)</label>
+              <input
+                type="number"
+                min={0}
+                value={dailyAiLimit}
+                onChange={(e) => setDailyAiLimit(e.target.value)}
+                placeholder="Ex: 25 requisições por dia"
+                style={inputStyle}
+              />
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
             <button
@@ -768,7 +819,11 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
   const [targetBurn, setTargetBurn] = useState('450');
   const [targetWater, setTargetWater] = useState('2500');
 
-  // Form states - AI & Status
+  // Form states - AI, Tier & Status
+  const [accountTier, setAccountTier] = useState<'FREE' | 'PRO'>(
+    (initialUser.accountTier || 'FREE').toUpperCase() === 'PRO' ? 'PRO' : 'FREE'
+  );
+  const [tierSaving, setTierSaving] = useState(false);
   const [aiBlocked, setAiBlocked] = useState(initialUser.aiBlocked);
   const [dailyAiLimit, setDailyAiLimit] = useState(
     initialUser.dailyAiLimit ? String(initialUser.dailyAiLimit) : ''
@@ -789,6 +844,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
         setDetail(data);
         setName(data.user.name || '');
         setEmail(data.user.email || '');
+        setAccountTier((data.user.accountTier || 'FREE').toUpperCase() === 'PRO' ? 'PRO' : 'FREE');
         setAiBlocked(data.user.aiBlocked);
         setDailyAiLimit(data.user.dailyAiLimit ? String(data.user.dailyAiLimit) : '');
         setIsPaused(data.user.status === 'PAUSED');
@@ -819,6 +875,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
       const payload: Record<string, any> = {
         name: name.trim(),
         email: email.trim(),
+        accountTier,
         goal,
         currentWeight: Number(currentWeight) || undefined,
         targetWeight: Number(targetWeight) || undefined,
@@ -853,12 +910,48 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     }
   };
 
+  const handleSelectTierImmediate = async (nextTier: 'FREE' | 'PRO') => {
+    if (nextTier === accountTier || tierSaving) return;
+    setTierSaving(true);
+    setFeedback(null);
+    try {
+      const resp = await fetch(`/api/admin/users/${userId}/tier`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ accountTier: nextTier })
+      });
+      if (!resp.ok) {
+        setFeedback({ text: 'Não foi possível alterar a camada da conta.', isError: true });
+        return;
+      }
+      setAccountTier(nextTier);
+      const msg =
+        nextTier === 'PRO'
+          ? `Conta atualizada para Forma PRO (todas as funções de IA liberadas)!`
+          : `Conta atualizada para FREE (camada visual essencial simplificada)!`;
+      setFeedback({ text: msg, isError: false });
+      onUpdated(msg);
+      loadUserDetail();
+    } catch {
+      setFeedback({ text: 'Erro de rede ao alterar camada da conta.', isError: true });
+    } finally {
+      setTierSaving(false);
+    }
+  };
+
   const handleSaveGovernance = async () => {
     setSaving(true);
     setFeedback(null);
     try {
       const limitValue = dailyAiLimit.trim() === '' ? 0 : Number(dailyAiLimit);
-      const [aiResp, statusResp] = await Promise.all([
+      const [tierResp, aiResp, statusResp] = await Promise.all([
+        fetch(`/api/admin/users/${userId}/tier`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ accountTier })
+        }),
         fetch(`/api/admin/users/${userId}/ai-access`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -879,8 +972,8 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
         })
       ]);
 
-      if (!aiResp.ok || !statusResp.ok) {
-        setFeedback({ text: 'Falha ao atualizar permissões de IA ou status da conta.', isError: true });
+      if (!tierResp.ok || !aiResp.ok || !statusResp.ok) {
+        setFeedback({ text: 'Falha ao atualizar camada, permissões de IA ou status da conta.', isError: true });
         return;
       }
 
@@ -926,13 +1019,31 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                 }}>
                   {summary.status === 'PAUSED' ? '⏸️ Pausada' : '🟢 Ativa'}
                 </span>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '4px',
+                  padding: '2px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 800,
+                  background: accountTier === 'PRO'
+                    ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(16, 185, 129, 0.22))'
+                    : 'rgba(148, 163, 184, 0.16)',
+                  color: accountTier === 'PRO' ? '#ddd6fe' : '#cbd5e1',
+                  border: `1px solid ${accountTier === 'PRO' ? 'rgba(167, 139, 250, 0.45)' : 'rgba(148, 163, 184, 0.28)'}`
+                }}>
+                  {accountTier === 'PRO' ? <><Sparkles size={11} /> FORMA PRO</> : 'FREE • Essencial'}
+                </span>
                 <span className="font-mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                   ID: {summary.id.slice(0, 8)}...
                 </span>
               </div>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                {summary.email} • Provedor: <strong>{summary.authProvider}</strong> • IA hoje: <strong>{summary.todayAiRequests}</strong>
-                {summary.dailyAiLimit ? ` / ${summary.dailyAiLimit}` : ' (ilimitado)'}
+                {summary.email} • Provedor: <strong>{summary.authProvider}</strong> •{' '}
+                {accountTier === 'PRO' ? (
+                  <>
+                    IA hoje: <strong>{summary.todayAiRequests}</strong>
+                    {summary.dailyAiLimit ? ` / ${summary.dailyAiLimit}` : ' (ilimitado)'}
+                  </>
+                ) : (
+                  <span>Camada Essencial Simplificada (Sem IA)</span>
+                )}
               </p>
             </div>
           </div>
@@ -940,6 +1051,75 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}>
             <X size={22} />
           </button>
+        </div>
+
+        {/* Seletor Direto de Camada da Conta (Sem Pagamento) */}
+        <div style={{
+          padding: '14px 16px',
+          borderRadius: '14px',
+          marginBottom: '16px',
+          backgroundColor: 'rgba(15, 23, 42, 0.72)',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: '#f8fafc' }}>
+              Camada da Conta (seleção administrativa • sem gateway de pagamento)
+            </span>
+            {tierSaving && (
+              <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 700 }}>Atualizando camada...</span>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '10px' }}>
+            <button
+              type="button"
+              disabled={tierSaving}
+              onClick={() => handleSelectTierImmediate('FREE')}
+              style={{
+                textAlign: 'left',
+                padding: '11px 14px',
+                borderRadius: '11px',
+                backgroundColor: accountTier === 'FREE' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                border: `1.5px solid ${accountTier === 'FREE' ? '#10b981' : 'rgba(255, 255, 255, 0.08)'}`,
+                color: '#f8fafc'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: accountTier === 'FREE' ? '#34d399' : '#cbd5e1' }}>
+                  🌿 Camada Free (Essencial)
+                </span>
+                {accountTier === 'FREE' && <Check size={14} color="#34d399" />}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                Interface limpa e direta: Tabela TACO, fichas manuais, Ilha Dinâmica e gráficos.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              disabled={tierSaving}
+              onClick={() => handleSelectTierImmediate('PRO')}
+              style={{
+                textAlign: 'left',
+                padding: '11px 14px',
+                borderRadius: '11px',
+                background: accountTier === 'PRO'
+                  ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.24), rgba(16, 185, 129, 0.14))'
+                  : 'rgba(255, 255, 255, 0.03)',
+                border: `1.5px solid ${accountTier === 'PRO' ? '#a78bfa' : 'rgba(255, 255, 255, 0.08)'}`,
+                color: '#f8fafc'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 800, color: accountTier === 'PRO' ? '#ddd6fe' : '#cbd5e1' }}>
+                  <Sparkles size={13} /> Camada Forma Pro (IA Completa)
+                </span>
+                {accountTier === 'PRO' && <Check size={14} color="#c4b5fd" />}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                Libera Foto IA, Voz IA, Criador/Calculadora de Treino IA e Diagnóstico de Evolução.
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}

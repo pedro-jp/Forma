@@ -107,6 +107,7 @@ public class SyncService {
         return Map.of(
             "status", "saved",
             "name", savedUser.getName() != null ? savedUser.getName() : "",
+            "accountTier", savedUser.getAccountTier(),
             "profile", SyncDto.ProfileDto.fromEntity(savedProfile)
         );
     }
@@ -379,7 +380,8 @@ public class SyncService {
             userActivityLogRepository.findByUserIdOrderByActivityTimestampDesc(userId).stream()
                 .map(SyncDto.ActivityLogDto::fromEntity).toList(),
             Instant.now(),
-            forceResetEpochMs
+            forceResetEpochMs,
+            user != null ? user.getAccountTier() : "FREE"
         );
     }
 

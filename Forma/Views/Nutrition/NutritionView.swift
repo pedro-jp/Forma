@@ -20,6 +20,7 @@ struct NutritionView: View {
     @State private var showVoiceFoodSheet: Bool = false
     @State private var openCameraDirectly: Bool = false
     @State private var mealToAdd: MealType = .lunch
+    @ObservedObject private var authManager = AuthManager.shared
 
     private var profile: Profile? { profiles.first }
 
@@ -104,22 +105,26 @@ struct NutritionView: View {
                 VStack(spacing: FormaTheme.Spacing.sectionGap) {
                     FormaScreenHeader(
                         title: "Diário Alimentar",
-                        subtitle: "Controle diário de calorias e nutrientes"
+                        subtitle: authManager.isPro
+                            ? "Controle diário de calorias e nutrientes"
+                            : "Controle diário pela Tabela TACO e hidratação"
                     ) {
                         HStack(spacing: 8) {
-                            Button {
-                                mealToAdd = currentSuggestedMeal()
-                                openCameraDirectly = true
-                                showVoiceFoodSheet = true
-                            } label: {
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(FormaTheme.Colors.brand)
-                                    .frame(width: 36, height: 36)
-                                    .background(FormaTheme.Colors.brandSoft)
-                                    .clipShape(Circle())
+                            if authManager.isPro {
+                                Button {
+                                    mealToAdd = currentSuggestedMeal()
+                                    openCameraDirectly = true
+                                    showVoiceFoodSheet = true
+                                } label: {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .frame(width: 36, height: 36)
+                                        .background(FormaTheme.Colors.brandSoft)
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
 
                             Button {
                                 mealToAdd = currentSuggestedMeal()
@@ -127,9 +132,9 @@ struct NutritionView: View {
                                 showVoiceFoodSheet = true
                             } label: {
                                 HStack(spacing: 6) {
-                                    Image(systemName: "mic.fill")
+                                    Image(systemName: authManager.isPro ? "mic.fill" : "plus")
                                         .font(.system(size: 13, weight: .semibold))
-                                    Text("Refeição")
+                                    Text(authManager.isPro ? "Refeição" : "Adicionar")
                                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                                 }
                                 .foregroundStyle(.white)
@@ -164,11 +169,11 @@ struct NutritionView: View {
                                     openCameraDirectly = false
                                     showVoiceFoodSheet = true
                                 },
-                                onCameraTap: {
+                                onCameraTap: authManager.isPro ? {
                                     mealToAdd = meal
                                     openCameraDirectly = true
                                     showVoiceFoodSheet = true
-                                },
+                                } : nil,
                                 onDeleteEntry: { entry in
                                     FormaDataStore.shared.deleteFoodEntry(entry, in: modelContext)
                                 }
@@ -184,6 +189,11 @@ struct NutritionView: View {
             .id(allFoodEntries.count)
             .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: authManager.accountTier) { _, newTier in
+                if newTier == .free {
+                    openCameraDirectly = false
+                }
+            }
             .sheet(isPresented: $showVoiceFoodSheet, onDismiss: { openCameraDirectly = false }) {
                 VoiceAddFoodView(preselectedMeal: mealToAdd, initialOpenCamera: openCameraDirectly) { newEntry in
                     FormaDataStore.shared.syncTodayData(lastFoodName: newEntry.name, lastFoodCalories: newEntry.calories)
