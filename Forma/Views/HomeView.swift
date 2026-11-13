@@ -110,20 +110,6 @@ struct HomeView: View {
         return weightEntries[0].weight - weightEntries[1].weight
     }
 
-    private var userInitials: String {
-        let parts = nomeUsuario
-            .split(separator: " ")
-            .map { String($0.prefix(1)).uppercased() }
-            .filter { !$0.isEmpty }
-        if parts.count >= 2 {
-            return "\(parts[0])\(parts[parts.count - 1])"
-        }
-        if !nomeUsuario.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return String(nomeUsuario.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2)).uppercased()
-        }
-        return "AT"
-    }
-
     private var metaCaloriasConsumirAjustada: Double {
         metaCaloriasConsumir + caloriasTreinosHoje
     }
@@ -330,7 +316,12 @@ struct HomeView: View {
 
     private var headerView: some View {
         HStack(spacing: 14) {
-            userAvatarView
+            FormaUserAvatar(
+                name: nomeUsuario,
+                isPro: authManager.isPro,
+                size: 48,
+                badgeBorderColor: FormaTheme.Colors.pageBackground
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(saudacao(nome: nomeUsuario))
@@ -382,53 +373,6 @@ struct HomeView: View {
                     icon: objetivo.icon,
                     tint: FormaTheme.Colors.brand
                 )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var userAvatarView: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if authManager.isPro {
-                Circle()
-                    .fill(FormaTheme.Colors.aiAccent.opacity(0.14))
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Text(userInitials)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(FormaTheme.Colors.aiGradient)
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(FormaTheme.Colors.aiGradient, lineWidth: 2.0)
-                    )
-
-                Circle()
-                    .fill(FormaTheme.Colors.aiGradient)
-                    .frame(width: 17, height: 17)
-                    .overlay(
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 8.5, weight: .bold))
-                            .foregroundStyle(.white)
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(FormaTheme.Colors.pageBackground, lineWidth: 1.5)
-                    )
-                    .offset(x: 2, y: 2)
-            } else {
-                Circle()
-                    .fill(FormaTheme.Colors.brandSoft)
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Text(userInitials)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(FormaTheme.Colors.brand)
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
             }
         }
     }

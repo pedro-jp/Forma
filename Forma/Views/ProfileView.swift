@@ -17,7 +17,6 @@ struct ProfileView: View {
     @FocusState private var isWeightFocused: Bool
     @State private var weightInputText: String = ""
     @State private var heightInputText: String = ""
-    @State private var savedToastMessage: String? = nil
     @State private var isLoggingOut: Bool = false
     @State private var isDeletingAccount: Bool = false
     @State private var showDeleteAccountAlert: Bool = false
@@ -31,30 +30,19 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if let toast = savedToastMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.white)
-                        Text(toast)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity)
-                    .background(FormaTheme.Colors.energyGreen)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+            ScrollView {
+                if let profile = profiles.first {
+                    @Bindable var bindableProfile = profile
+                    let fullCtx = FormaDataStore.shared.buildRecalculationContext(in: modelContext)
+                    let contextualMetrics = bindableProfile.contextualMetrics(context: fullCtx)
 
-                ScrollView {
-                    if let profile = profiles.first {
-                        @Bindable var bindableProfile = profile
-                        let fullCtx = FormaDataStore.shared.buildRecalculationContext(in: modelContext)
-                        let contextualMetrics = bindableProfile.contextualMetrics(context: fullCtx)
+                    VStack(alignment: .leading, spacing: FormaTheme.Spacing.sectionGap) {
+                        FormaScreenHeader(
+                            title: "Perfil & Ajustes",
+                            subtitle: "Medidas, metas diárias e sua conta"
+                        )
 
-                        VStack(alignment: .leading, spacing: FormaTheme.Spacing.sectionGap) {
-                            profileHeaderCard(profile: bindableProfile)
+                        profileHeaderCard(profile: bindableProfile)
                             accountTierCard
                             fitnessGoalCard(profile: bindableProfile)
 
@@ -116,7 +104,7 @@ struct ProfileView: View {
                             saveSettingsButton(profile: bindableProfile)
                         }
                         .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
-                        .padding(.top, 14)
+                        .padding(.top, 10)
                         .onAppear { syncInputStrings(from: profile) }
                         .onChange(of: profile.currentWeight) { _, newWeight in
                             if !isWeightFocused {
@@ -137,7 +125,6 @@ struct ProfileView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .dismissKeyboardOnTap()
                 .withDoneKeyboardToolbar()
-            }
             .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showLegalPrivacySheet) {
@@ -166,21 +153,30 @@ struct ProfileView: View {
     private func profileHeaderCard(@Bindable profile: Profile) -> some View {
         FormaCard(padding: 18) {
             HStack(spacing: 16) {
-                Image("profile")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 60, height: 60)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 1.5))
+                FormaUserAvatar(
+                    name: profile.nome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? (authManager.currentUserName ?? "Forma")
+                        : profile.nome,
+                    isPro: authManager.isPro,
+                    size: 56,
+                    badgeBorderColor: FormaTheme.Colors.cardSurface
+                )
 
                 VStack(alignment: .leading, spacing: 3) {
-                    TextField("Seu Nome", text: $profile.nome)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                    HStack(spacing: 6) {
+                        TextField("Seu Nome", text: $profile.nome)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
 
                     Text(profile.email.isEmpty ? (authManager.currentUserEmail ?? "Conta Forma") : profile.email)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -532,14 +528,7 @@ struct ProfileView: View {
     private func showToast(_ text: String) {
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
-        withAnimation(.spring(duration: 0.3)) {
-            savedToastMessage = text
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            withAnimation {
-                savedToastMessage = nil
-            }
-        }
+        AuthManager.shared.showRealtimeToast(text)
     }
 
     private func syncInputStrings(from profile: Profile) {

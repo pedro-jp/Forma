@@ -272,9 +272,9 @@ struct WeeklyCalorieChartCard: View {
                     }
                 }
                 .chartForegroundStyleScale([
-                    "Consumidas": FormaTheme.Colors.energyGreen,
-                    "Repouso": Color(red: 0.39, green: 0.40, blue: 0.95),
-                    "Treino/Ativas": FormaTheme.Colors.warning
+                    "Consumidas": FormaTheme.Colors.brand,
+                    "Repouso": FormaTheme.Colors.bodyWeight.opacity(0.72),
+                    "Treino/Ativas": FormaTheme.Colors.energyGreen
                 ])
                 .chartLegend(position: .bottom, alignment: .leading, spacing: 10)
                 .chartXSelection(value: $selectedDay)
@@ -302,7 +302,7 @@ struct WeeklyCalorieChartCard: View {
                             .foregroundStyle(.secondary)
                         Text("\(Int(totalConsumed.rounded())) kcal")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(FormaTheme.Colors.energyGreen)
+                            .foregroundStyle(FormaTheme.Colors.brand)
                     }
 
                     Spacer()
@@ -313,7 +313,7 @@ struct WeeklyCalorieChartCard: View {
                             .foregroundStyle(.secondary)
                         Text("\(Int(totalBurned.rounded())) kcal")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(FormaTheme.Colors.warning)
+                            .foregroundStyle(FormaTheme.Colors.energyGreen)
                     }
                 }
             }

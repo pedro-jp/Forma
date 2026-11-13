@@ -677,9 +677,80 @@ struct FormaHydrationCard: View {
             .foregroundStyle(isPrimary ? .white : FormaTheme.Colors.water)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
-            .background(isPrimary ? FormaTheme.Colors.water : FormaTheme.Colors.water.opacity(0.12))
+                    .background(isPrimary ? FormaTheme.Colors.water : FormaTheme.Colors.water.opacity(0.12))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Avatar Dinâmico por Plano (PRO / Essencial)
+
+struct FormaUserAvatar: View {
+    let name: String
+    let isPro: Bool
+    var size: CGFloat = 48
+    var badgeBorderColor: Color = FormaTheme.Colors.pageBackground
+
+    private var initials: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed
+            .split(separator: " ")
+            .map { String($0.prefix(1)).uppercased() }
+            .filter { !$0.isEmpty }
+        if parts.count >= 2 {
+            return "\(parts[0])\(parts[parts.count - 1])"
+        }
+        if !trimmed.isEmpty {
+            return String(trimmed.prefix(2)).uppercased()
+        }
+        return "FM"
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if isPro {
+                Circle()
+                    .fill(FormaTheme.Colors.aiAccent.opacity(0.14))
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Text(initials)
+                            .font(.system(size: round(size * 0.35), weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.aiGradient)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(FormaTheme.Colors.aiGradient, lineWidth: 2.0)
+                    )
+
+                let badgeSize = max(16, round(size * 0.34))
+                Circle()
+                    .fill(FormaTheme.Colors.aiGradient)
+                    .frame(width: badgeSize, height: badgeSize)
+                    .overlay(
+                        Image(systemName: "sparkles")
+                            .font(.system(size: badgeSize * 0.5, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(badgeBorderColor, lineWidth: 1.5)
+                    )
+                    .offset(x: 2, y: 2)
+            } else {
+                Circle()
+                    .fill(FormaTheme.Colors.brandSoft)
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Text(initials)
+                            .font(.system(size: round(size * 0.35), weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(FormaTheme.Colors.brand.opacity(0.28), lineWidth: 1.5)
+                    )
+            }
+        }
     }
 }

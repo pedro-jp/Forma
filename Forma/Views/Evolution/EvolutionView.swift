@@ -427,7 +427,16 @@ struct EvolutionView: View {
                 VStack(spacing: 8) {
                     ForEach(weightEntries) { entry in
                         FormaCard(padding: 14, cornerRadius: 14) {
-                            HStack {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(FormaTheme.Colors.bodyWeight.opacity(0.12))
+                                        .frame(width: 36, height: 36)
+                                    Image(systemName: "scalemass.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(FormaTheme.Colors.bodyWeight)
+                                }
+
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(entry.date.formatted(.dateTime.day().month().year().hour().minute().locale(Locale(identifier: "pt_BR"))))
                                         .font(.system(size: 14, weight: .semibold))
@@ -445,15 +454,21 @@ struct EvolutionView: View {
                                     .font(.system(size: 16, weight: .bold, design: .rounded))
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
 
-                                Button {
-                                    deleteWeightEntry(entry)
+                                Menu {
+                                    Button(role: .destructive) {
+                                        deleteWeightEntry(entry)
+                                        AuthManager.shared.showRealtimeToast("Pesagem removida")
+                                    } label: {
+                                        Label("Excluir Pesagem", systemImage: "trash")
+                                    }
                                 } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(FormaTheme.Colors.danger.opacity(0.65))
-                                        .padding(.leading, 8)
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 28, height: 28)
+                                        .background(Color.primary.opacity(0.05))
+                                        .clipShape(Circle())
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }

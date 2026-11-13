@@ -227,13 +227,18 @@ struct WorkoutCard: View {
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
 
-                            Button(action: onDelete) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(FormaTheme.Colors.danger.opacity(0.68))
-                                    .padding(2)
+                            Menu {
+                                Button(role: .destructive, action: onDelete) {
+                                    Label("Excluir Sessão", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 26, height: 26)
+                                    .background(Color.primary.opacity(0.05))
+                                    .clipShape(Circle())
                             }
-                            .buttonStyle(.plain)
                         }
                     }
 

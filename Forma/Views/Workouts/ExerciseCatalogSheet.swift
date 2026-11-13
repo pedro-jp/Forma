@@ -83,7 +83,7 @@ public struct ExerciseCatalogSheet: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Color(.systemBackground))
+                .background(FormaTheme.Colors.cardSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -113,16 +113,33 @@ public struct ExerciseCatalogSheet: View {
 
                 // Grid de Cards com Vídeos 3D de 10s e Músculo Alvo em Vermelho
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-                        ForEach(filteredItems) { item in
-                            exerciseCard(item: item)
+                    if filteredItems.isEmpty {
+                        FormaCard(padding: 24) {
+                            FormaEmptyState(
+                                icon: "magnifyingglass",
+                                title: "Nenhum exercício encontrado",
+                                subtitle: "Tente buscar por outro músculo ou limpe os filtros ativos.",
+                                actionTitle: "Limpar Filtros",
+                                onAction: {
+                                    searchText = ""
+                                    selectedGroup = "Todos"
+                                    hierarchyFilter = .all
+                                }
+                            )
                         }
+                        .padding(16)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                            ForEach(filteredItems) { item in
+                                exerciseCard(item: item)
+                            }
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
                 }
                 .scrollIndicators(.hidden)
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
             .navigationTitle("Vídeos de Execução 3D")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -150,10 +167,10 @@ public struct ExerciseCatalogSheet: View {
         } label: {
             Text(group)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundColor(selectedGroup == group ? .white : Color("FontNormal"))
+                .foregroundColor(selectedGroup == group ? .white : FormaTheme.Colors.primaryText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(selectedGroup == group ? Color("AccentColor") : Color("CardBackground"))
+                .background(selectedGroup == group ? FormaTheme.Colors.brand : FormaTheme.Colors.cardSurface)
                 .clipShape(Capsule())
                 .shadow(color: Color.black.opacity(0.03), radius: 3, x: 0, y: 1)
         }
@@ -193,7 +210,7 @@ public struct ExerciseCatalogSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.name)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundColor(Color("FontNormal"))
+                        .foregroundColor(FormaTheme.Colors.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
@@ -210,7 +227,7 @@ public struct ExerciseCatalogSheet: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
             }
-            .background(Color("CardBackground"))
+            .background(FormaTheme.Colors.cardSurface)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
         }

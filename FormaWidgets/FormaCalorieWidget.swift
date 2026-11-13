@@ -312,21 +312,21 @@ struct MediumCalorieWidgetView: View {
                     label: "Proteínas",
                     current: entry.data.proteinConsumed,
                     target: entry.data.proteinTarget,
-                    color: Color(red: 0.32, green: 0.80, blue: 0.55)
+                    color: Color(red: 0.93, green: 0.36, blue: 0.42)
                 )
                 
                 WidgetMacroRow(
                     label: "Carbos",
                     current: entry.data.carbsConsumed,
                     target: entry.data.carbsTarget,
-                    color: Color(red: 0.98, green: 0.65, blue: 0.22)
+                    color: Color(red: 0.24, green: 0.56, blue: 0.96)
                 )
                 
                 WidgetMacroRow(
                     label: "Gorduras",
                     current: entry.data.fatConsumed,
                     target: entry.data.fatTarget,
-                    color: Color(red: 0.95, green: 0.45, blue: 0.32)
+                    color: Color(red: 0.96, green: 0.65, blue: 0.14)
                 )
                 
                 Divider()

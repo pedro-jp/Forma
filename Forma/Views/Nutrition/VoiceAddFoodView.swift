@@ -99,35 +99,16 @@ struct VoiceAddFoodView: View {
                     }
                 }
             }
-            .alert(
-                editingPortionItem != nil ? "Ajustar \(editingPortionItem!.name)" : "Ajustar Quantidade",
-                isPresented: Binding(
-                    get: { editingPortionItem != nil },
-                    set: { if !$0 { editingPortionItem = nil } }
-                )
-            ) {
-                TextField(
-                    editingPortionItem?.isLiquid == true ? "Quantidade em ml" : "Quantidade em g",
-                    text: $customPortionString
-                )
-                .keyboardType(.decimalPad)
-
-                Button("Cancelar", role: .cancel) {
-                    editingPortionItem = nil
-                }
-                Button("Aplicar") {
-                    if let item = editingPortionItem {
-                        let normalized = customPortionString.replacingOccurrences(of: ",", with: ".")
-                        if let val = Double(normalized), val > 0 {
-                            voiceService.updateItemPortion(id: item.id, newPortion: val)
-                        }
+            .sheet(item: $editingPortionItem) { item in
+                VoicePlateItemPortionSheet(
+                    item: item,
+                    onApply: { newPortion in
+                        voiceService.updateItemPortion(id: item.id, newPortion: newPortion)
+                    },
+                    onRemove: {
+                        voiceService.removeItem(id: item.id)
                     }
-                    editingPortionItem = nil
-                }
-            } message: {
-                if let item = editingPortionItem {
-                    Text("Informe o peso ou volume exato em \(item.isLiquid || item.unit == "ml" ? "ml" : "gramas (g)"):")
-                }
+                )
             }
             .alert(
                 "Erro ao Sincronizar Refeição",
@@ -862,6 +843,224 @@ struct VoiceAddFoodView: View {
                 saveErrorMessage = FormaAPIClient.humanizeErrorMessage(error.localizedDescription)
             }
         }
+    }
+}
+
+private struct VoicePlateItemPortionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let item: VoicePlateItem
+    let onApply: (Double) -> Void
+    let onRemove: () -> Void
+
+    @State private var portionValue: Double
+    @State private var portionText: String
+    @FocusState private var isPortionFocused: Bool
+
+    init(
+        item: VoicePlateItem,
+        onApply: @escaping (Double) -> Void,
+        onRemove: @escaping () -> Void
+    ) {
+        self.item = item
+        self.onApply = onApply
+        self.onRemove = onRemove
+        let initial = max(1.0, item.portionValue)
+        _portionValue = State(initialValue: initial)
+        _portionText = State(initialValue: "\(Int(initial.rounded()))")
+    }
+
+    private var unitLabel: String {
+        (item.isLiquid || item.unit == "ml") ? "ml" : "g"
+    }
+
+    private var stepDelta: Double {
+        (item.isLiquid || item.unit == "ml") ? 50 : 10
+    }
+
+    private var presets: [Int] {
+        (item.isLiquid || item.unit == "ml") ? [100, 200, 250, 350, 500] : [50, 100, 150, 200, 300]
+    }
+
+    private var previewCalories: Double { item.baseCaloriesPer100 * (portionValue / 100.0) }
+    private var previewProtein: Double { item.baseProteinPer100 * (portionValue / 100.0) }
+    private var previewCarbs: Double { item.baseCarbsPer100 * (portionValue / 100.0) }
+    private var previewFat: Double { item.baseFatPer100 * (portionValue / 100.0) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    FormaCard(padding: 16, cornerRadius: 18) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(item.name)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                            if !item.brand.isEmpty || !item.source.isEmpty {
+                                Text(item.brand.isEmpty ? item.source : item.brand)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 8) {
+                                CleanMacroBadge(
+                                    label: "Calorias",
+                                    value: "\(Int(previewCalories.rounded())) kcal",
+                                    color: FormaTheme.Colors.brand
+                                )
+                                CleanMacroBadge(
+                                    label: "Proteína",
+                                    value: "\(Int(previewProtein.rounded()))g",
+                                    color: FormaTheme.Colors.protein
+                                )
+                                CleanMacroBadge(
+                                    label: "Carbo",
+                                    value: "\(Int(previewCarbs.rounded()))g",
+                                    color: FormaTheme.Colors.carbs
+                                )
+                                CleanMacroBadge(
+                                    label: "Gordura",
+                                    value: "\(Int(previewFat.rounded()))g",
+                                    color: FormaTheme.Colors.fat
+                                )
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Quantidade (\(unitLabel))")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                        HStack(spacing: 10) {
+                            stepButton(delta: -stepDelta, label: "-\(Int(stepDelta))")
+
+                            HStack(spacing: 4) {
+                                TextField("100", text: $portionText)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.center)
+                                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                                    .foregroundStyle(FormaTheme.Colors.primaryText)
+                                    .focused($isPortionFocused)
+                                    .onChange(of: portionText) { _, newValue in
+                                        let normalized = newValue.replacingOccurrences(of: ",", with: ".")
+                                        if let parsed = Double(normalized), parsed > 0 {
+                                            portionValue = min(parsed, 5000)
+                                        }
+                                    }
+                                Text(unitLabel)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.primary.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(
+                                        isPortionFocused ? FormaTheme.Colors.brand : Color.clear,
+                                        lineWidth: 1.4
+                                    )
+                            )
+
+                            stepButton(delta: stepDelta, label: "+\(Int(stepDelta))")
+                        }
+
+                        HStack(spacing: 8) {
+                            ForEach(presets, id: \.self) { preset in
+                                let isSelected = Int(portionValue.rounded()) == preset
+                                Button {
+                                    applyPortion(Double(preset))
+                                } label: {
+                                    Text("\(preset)\(unitLabel)")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(isSelected ? .white : FormaTheme.Colors.brand)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 7)
+                                        .background(isSelected ? FormaTheme.Colors.brand : FormaTheme.Colors.brandSoft)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    VStack(spacing: 10) {
+                        Button {
+                            onApply(portionValue)
+                            dismiss()
+                        } label: {
+                            Text("Aplicar Quantidade")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(FormaTheme.Colors.brandGradient)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(role: .destructive) {
+                            onRemove()
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("Remover do Prato")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(FormaTheme.Colors.danger)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                .padding(.vertical, 16)
+            }
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .dismissKeyboardOnTap()
+            .withDoneKeyboardToolbar()
+            .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
+            .navigationTitle("Ajustar Quantidade")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(410), .medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func stepButton(delta: Double, label: String) -> some View {
+        Button {
+            applyPortion(portionValue + delta)
+        } label: {
+            Text(label)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(FormaTheme.Colors.brand)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(FormaTheme.Colors.brandSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func applyPortion(_ newValue: Double) {
+        let minStep = (item.isLiquid || item.unit == "ml") ? 25.0 : 5.0
+        let clamped = max(minStep, min(5000, newValue))
+        portionValue = clamped
+        portionText = "\(Int(clamped.rounded()))"
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }
 

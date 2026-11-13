@@ -11,7 +11,12 @@ import SwiftData
 struct AddWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    
+
+    private enum WorkoutField {
+        case title
+        case notes
+    }
+
     @State private var title: String = ""
     @State private var selectedType: WorkoutType = .bodybuilding
     @State private var durationMinutes: Double = 50.0
@@ -19,7 +24,10 @@ struct AddWorkoutView: View {
     @State private var notes: String = ""
     @State private var isSaving: Bool = false
     @State private var saveErrorMessage: String? = nil
-    
+    @FocusState private var focusedField: WorkoutField?
+
+    private let durationPresets: [Int] = [30, 45, 60, 90]
+
     private var defaultCaloriesForType: Double {
         switch selectedType {
         case .bodybuilding: return durationMinutes * 7.0
@@ -31,65 +39,24 @@ struct AddWorkoutView: View {
         case .other: return durationMinutes * 6.0
         }
     }
-    
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Tipo de Treino") {
-                    Picker("Modalidade", selection: $selectedType) {
-                        ForEach(WorkoutType.allCases) { type in
-                            Label(type.rawValue, systemImage: type.icon)
-                                .tag(type)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .onChange(of: selectedType) { _, _ in
-                        caloriesBurned = defaultCaloriesForType
-                    }
-                    
-                    TextField("Nome do Treino (ex: Peito e Tríceps)", text: $title)
+            ScrollView {
+                VStack(spacing: FormaTheme.Spacing.sectionGap) {
+                    modalityCard
+                    intensityCard
+                    notesCard
+                    primarySaveButton
                 }
-                
-                Section("Duração e Intensidade") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Duração")
-                            Spacer()
-                            Text("\(Int(durationMinutes)) min")
-                                .fontWeight(.bold)
-                                .foregroundColor(Color("AccentColor"))
-                        }
-                        Slider(value: $durationMinutes, in: 10...180, step: 5)
-                            .tint(Color("AccentColor"))
-                            .onChange(of: durationMinutes) { _, _ in
-                                caloriesBurned = defaultCaloriesForType
-                            }
-                    }
-                    .padding(.vertical, 4)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Calorias Estimadas")
-                            Spacer()
-                            Text("\(Int(caloriesBurned)) kcal")
-                                .fontWeight(.bold)
-                                .foregroundColor(Color("AccentGreen"))
-                        }
-                        Slider(value: $caloriesBurned, in: 50...1200, step: 10)
-                            .tint(Color("AccentGreen"))
-                    }
-                    .padding(.vertical, 4)
-                }
-                
-                Section("Observações e Cargas") {
-                    TextField("Ex: Supino 4x10 (30kg cada lado), agachamento...", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
-                }
+                .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
+                .padding(.vertical, 16)
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .dismissKeyboardOnTap()
             .withDoneKeyboardToolbar()
+            .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
             .navigationTitle("Registrar Treino")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -100,29 +67,9 @@ struct AddWorkoutView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Salvando..." : "Salvar") {
-                        guard !isSaving else { return }
-                        let finalTitle = title.trimmingCharacters(in: .whitespaces).isEmpty ? selectedType.rawValue : title
-                        let workout = WorkoutEntry(
-                            title: finalTitle,
-                            workoutType: selectedType,
-                            durationMinutes: Int(durationMinutes),
-                            caloriesBurned: caloriesBurned,
-                            date: Date(),
-                            notes: notes
-                        )
-                        isSaving = true
-                        saveErrorMessage = nil
-                        Task { @MainActor in
-                            do {
-                                try await FormaDataStore.shared.insertWorkoutEntryRemoteFirst(workout)
-                                isSaving = false
-                                dismiss()
-                            } catch {
-                                isSaving = false
-                                saveErrorMessage = FormaAPIClient.humanizeErrorMessage(error.localizedDescription)
-                            }
-                        }
+                        saveWorkout()
                     }
+                    .fontWeight(.semibold)
                     .disabled(isSaving)
                 }
             }
@@ -136,6 +83,195 @@ struct AddWorkoutView: View {
                 Button("OK", role: .cancel) { saveErrorMessage = nil }
             } message: {
                 Text(saveErrorMessage ?? "")
+            }
+        }
+    }
+
+    private var modalityCard: some View {
+        FormaCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Modalidade & Identificação", systemImage: "figure.strengthtraining.traditional")
+                    .font(.headline)
+                    .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(WorkoutType.allCases) { type in
+                            let isSelected = selectedType == type
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                selectedType = type
+                                caloriesBurned = defaultCaloriesForType
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: type.icon)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text(type.rawValue)
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                }
+                                .foregroundStyle(isSelected ? .white : FormaTheme.Colors.primaryText)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(isSelected ? FormaTheme.Colors.brand : Color.primary.opacity(0.05))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                TextField("Nome do Treino (ex: Peito e Tríceps)", text: $title)
+                    .focused($focusedField, equals: .title)
+                    .font(.subheadline)
+                    .padding(13)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous)
+                            .stroke(
+                                focusedField == .title ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                lineWidth: focusedField == .title ? 1.4 : 0.8
+                            )
+                    )
+            }
+        }
+    }
+
+    private var intensityCard: some View {
+        FormaCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Duração", systemImage: "timer")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                        Spacer()
+                        Text("\(Int(durationMinutes)) min")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                    }
+
+                    HStack(spacing: 8) {
+                        ForEach(durationPresets, id: \.self) { mins in
+                            let isSelected = Int(durationMinutes.rounded()) == mins
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                durationMinutes = Double(mins)
+                                caloriesBurned = defaultCaloriesForType
+                            } label: {
+                                Text("\(mins) min")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(isSelected ? .white : FormaTheme.Colors.brand)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                    .background(isSelected ? FormaTheme.Colors.brand : FormaTheme.Colors.brandSoft)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Slider(value: $durationMinutes, in: 10...180, step: 5)
+                        .tint(FormaTheme.Colors.brand)
+                        .onChange(of: durationMinutes) { _, _ in
+                            caloriesBurned = defaultCaloriesForType
+                        }
+                }
+
+                Divider().background(Color.primary.opacity(0.06))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Calorias Estimadas", systemImage: "flame.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                        Spacer()
+                        Text("+\(Int(caloriesBurned)) kcal")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    }
+
+                    Slider(value: $caloriesBurned, in: 50...1200, step: 10)
+                        .tint(FormaTheme.Colors.energyGreen)
+                }
+            }
+        }
+    }
+
+    private var notesCard: some View {
+        FormaCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Observações e Cargas", systemImage: "note.text")
+                    .font(.headline)
+                    .foregroundStyle(FormaTheme.Colors.primaryText)
+
+                TextField("Ex: Supino 4x10 (30kg cada lado), agachamento...", text: $notes, axis: .vertical)
+                    .focused($focusedField, equals: .notes)
+                    .lineLimit(3...6)
+                    .font(.subheadline)
+                    .padding(13)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: FormaTheme.Radius.inner, style: .continuous)
+                            .stroke(
+                                focusedField == .notes ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                lineWidth: focusedField == .notes ? 1.4 : 0.8
+                            )
+                    )
+            }
+        }
+    }
+
+    private var primarySaveButton: some View {
+        Button {
+            saveWorkout()
+        } label: {
+            HStack(spacing: 8) {
+                if isSaving {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                }
+                Text(isSaving ? "Salvando Treino..." : "Salvar Treino")
+                    .font(.headline)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background(FormaTheme.Colors.brandGradient)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: FormaTheme.Colors.brand.opacity(0.25), radius: 8, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+    }
+
+    private func saveWorkout() {
+        guard !isSaving else { return }
+        focusedField = nil
+        let finalTitle = title.trimmingCharacters(in: .whitespaces).isEmpty ? selectedType.rawValue : title
+        let workout = WorkoutEntry(
+            title: finalTitle,
+            workoutType: selectedType,
+            durationMinutes: Int(durationMinutes),
+            caloriesBurned: caloriesBurned,
+            date: Date(),
+            notes: notes
+        )
+        isSaving = true
+        saveErrorMessage = nil
+        Task { @MainActor in
+            do {
+                try await FormaDataStore.shared.insertWorkoutEntryRemoteFirst(workout)
+                isSaving = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                AuthManager.shared.showRealtimeToast("Treino registrado!")
+                dismiss()
+            } catch {
+                isSaving = false
+                saveErrorMessage = FormaAPIClient.humanizeErrorMessage(error.localizedDescription)
             }
         }
     }

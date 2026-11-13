@@ -77,17 +77,17 @@ public struct FormaLiveActivity: Widget {
                             IslandMacroPill(
                                 label: "Prot",
                                 value: "\(Int(context.state.proteinConsumed))/\(Int(context.state.proteinTarget))g",
-                                color: Color(red: 0.32, green: 0.80, blue: 0.55)
+                                color: Color(red: 0.93, green: 0.36, blue: 0.42)
                             )
                             IslandMacroPill(
                                 label: "Carb",
                                 value: "\(Int(context.state.carbsConsumed))/\(Int(context.state.carbsTarget))g",
-                                color: Color(red: 0.98, green: 0.65, blue: 0.22)
+                                color: Color(red: 0.24, green: 0.56, blue: 0.96)
                             )
                             IslandMacroPill(
                                 label: "Gord",
                                 value: "\(Int(context.state.fatConsumed))/\(Int(context.state.fatTarget))g",
-                                color: Color(red: 0.95, green: 0.45, blue: 0.32)
+                                color: Color(red: 0.96, green: 0.65, blue: 0.14)
                             )
                         }
                         
@@ -216,9 +216,9 @@ struct LockScreenLiveActivityView: View {
             
             // Macros em Destaque
             HStack(spacing: 8) {
-                LockScreenMacroPill(name: "Proteína", current: state.proteinConsumed, target: state.proteinTarget, color: Color(red: 0.32, green: 0.80, blue: 0.55))
-                LockScreenMacroPill(name: "Carboidratos", current: state.carbsConsumed, target: state.carbsTarget, color: Color(red: 0.98, green: 0.65, blue: 0.22))
-                LockScreenMacroPill(name: "Gorduras", current: state.fatConsumed, target: state.fatTarget, color: Color(red: 0.95, green: 0.45, blue: 0.32))
+                LockScreenMacroPill(name: "Proteína", current: state.proteinConsumed, target: state.proteinTarget, color: Color(red: 0.93, green: 0.36, blue: 0.42))
+                LockScreenMacroPill(name: "Carboidratos", current: state.carbsConsumed, target: state.carbsTarget, color: Color(red: 0.24, green: 0.56, blue: 0.96))
+                LockScreenMacroPill(name: "Gorduras", current: state.fatConsumed, target: state.fatTarget, color: Color(red: 0.96, green: 0.65, blue: 0.14))
             }
         }
         .padding(16)

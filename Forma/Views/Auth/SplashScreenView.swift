@@ -18,13 +18,13 @@ struct SplashScreenView: View {
     var body: some View {
         ZStack {
             // Fundo escuro com gradiente radial sutil
-            Color(.systemBackground)
+            FormaTheme.Colors.pageBackground
                 .ignoresSafeArea()
             
             RadialGradient(
                 gradient: Gradient(colors: [
-                    Color("AccentColor").opacity(0.18),
-                    Color(.systemBackground).opacity(0.0)
+                    FormaTheme.Colors.brand.opacity(0.18),
+                    FormaTheme.Colors.pageBackground.opacity(0.0)
                 ]),
                 center: .center,
                 startRadius: 20,
@@ -39,7 +39,7 @@ struct SplashScreenView: View {
                 // Logo animada do Forma
                 ZStack {
                     Circle()
-                        .fill(Color("AccentColor").opacity(0.12))
+                        .fill(FormaTheme.Colors.brand.opacity(0.12))
                         .frame(width: 130, height: 130)
                         .blur(radius: 12)
                     
@@ -49,22 +49,18 @@ struct SplashScreenView: View {
                             .scaledToFit()
                             .frame(width: 104, height: 104)
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                            .shadow(color: Color("AccentColor").opacity(0.35), radius: 20, x: 0, y: 8)
+                            .shadow(color: FormaTheme.Colors.brand.opacity(0.35), radius: 20, x: 0, y: 8)
                     } else {
                         // Fallback elegante
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(LinearGradient(
-                                colors: [Color("AccentColor"), Color.green],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ))
+                            .fill(FormaTheme.Colors.brandGradient)
                             .frame(width: 104, height: 104)
                             .overlay(
                                 Image(systemName: "flame.fill")
                                     .font(.system(size: 48, weight: .bold))
                                     .foregroundColor(.white)
                             )
-                            .shadow(color: Color("AccentColor").opacity(0.35), radius: 20, x: 0, y: 8)
+                            .shadow(color: FormaTheme.Colors.brand.opacity(0.35), radius: 20, x: 0, y: 8)
                     }
                 }
                 .scaleEffect(logoScale)
@@ -74,7 +70,7 @@ struct SplashScreenView: View {
                 VStack(spacing: 8) {
                     Text("Forma")
                         .font(.system(size: 38, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Color("FontNormal"))
+                        .foregroundStyle(FormaTheme.Colors.primaryText)
                     
                     Text("Nutrição & Treinos Inteligentes")
                         .font(.system(size: 15, weight: .medium, design: .rounded))
@@ -87,7 +83,7 @@ struct SplashScreenView: View {
                 // Indicador minimalista de carregamento
                 HStack(spacing: 8) {
                     ProgressView()
-                        .tint(Color("AccentColor"))
+                        .tint(FormaTheme.Colors.brand)
                         .scaleEffect(0.9)
                     
                     Text("Iniciando...")

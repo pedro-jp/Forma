@@ -11,11 +11,19 @@ import CryptoKit
 
 struct LoginView: View {
     @ObservedObject private var authManager = AuthManager.shared
-    
+
+    private enum LoginFocusField {
+        case name
+        case email
+        case password
+    }
+
     @State private var isRegisterMode: Bool = false
     @State private var nameText: String = ""
     @State private var emailText: String = ""
     @State private var passwordText: String = ""
+    @State private var isPasswordVisible: Bool = false
+    @FocusState private var focusedField: LoginFocusField?
     
     // Nonce criptográfico para Apple Sign-In
     @State private var currentAppleNonce: String?
@@ -54,14 +62,10 @@ struct LoginView: View {
                                 .scaledToFit()
                                 .frame(width: 72, height: 72)
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .shadow(color: Color("AccentColor").opacity(0.25), radius: 12, x: 0, y: 4)
+                                .shadow(color: FormaTheme.Colors.brand.opacity(0.25), radius: 12, x: 0, y: 4)
                         } else {
                             Circle()
-                                .fill(LinearGradient(
-                                    colors: [Color("AccentColor"), Color.green],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ))
+                                .fill(FormaTheme.Colors.brandGradient)
                                 .frame(width: 72, height: 72)
                                 .overlay(
                                     Image(systemName: "flame.fill")
@@ -73,7 +77,7 @@ struct LoginView: View {
                         
                         Text("Forma")
                             .font(.system(size: 28, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Color("FontNormal"))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
                         
                         Text(isRegisterMode ? "Crie sua conta para gerenciar seus dados" : "Entre na sua conta para acessar seus dados")
                             .font(.subheadline)
@@ -96,51 +100,80 @@ struct LoginView: View {
                         if isRegisterMode {
                             HStack(spacing: 12) {
                                 Image(systemName: "person.fill")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(focusedField == .name ? FormaTheme.Colors.brand : .secondary)
                                     .frame(width: 20)
                                 TextField("Seu Nome Completo", text: $nameText)
                                     .textContentType(.name)
                                     .autocorrectionDisabled()
+                                    .focused($focusedField, equals: .name)
                             }
                             .padding(14)
-                            .background(Color("CardBackground"))
+                            .background(FormaTheme.Colors.cardSurface)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                                    .stroke(
+                                        focusedField == .name ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                        lineWidth: focusedField == .name ? 1.4 : 1
+                                    )
                             )
                         }
                         
                         HStack(spacing: 12) {
                             Image(systemName: "envelope.fill")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(focusedField == .email ? FormaTheme.Colors.brand : .secondary)
                                 .frame(width: 20)
                             TextField("E-mail", text: $emailText)
                                 .keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .focused($focusedField, equals: .email)
                         }
                         .padding(14)
-                        .background(Color("CardBackground"))
+                        .background(FormaTheme.Colors.cardSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                                .stroke(
+                                    focusedField == .email ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                    lineWidth: focusedField == .email ? 1.4 : 1
+                                )
                         )
                         
                         HStack(spacing: 12) {
                             Image(systemName: "lock.fill")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(focusedField == .password ? FormaTheme.Colors.brand : .secondary)
                                 .frame(width: 20)
-                            SecureField("Senha", text: $passwordText)
-                                .textContentType(isRegisterMode ? .newPassword : .password)
+                            Group {
+                                if isPasswordVisible {
+                                    TextField("Senha", text: $passwordText)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                } else {
+                                    SecureField("Senha", text: $passwordText)
+                                }
+                            }
+                            .textContentType(isRegisterMode ? .newPassword : .password)
+                            .focused($focusedField, equals: .password)
+
+                            Button {
+                                isPasswordVisible.toggle()
+                            } label: {
+                                Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
                         .padding(14)
-                        .background(Color("CardBackground"))
+                        .background(FormaTheme.Colors.cardSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                                .stroke(
+                                    focusedField == .password ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                    lineWidth: focusedField == .password ? 1.4 : 1
+                                )
                         )
 
                         if !isRegisterMode {
@@ -210,15 +243,9 @@ struct LoginView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
-                        .background(
-                            LinearGradient(
-                                colors: [Color("AccentColor"), Color.green],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .background(FormaTheme.Colors.brandGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .shadow(color: Color("AccentColor").opacity(0.3), radius: 8, x: 0, y: 4)
+                        .shadow(color: FormaTheme.Colors.brand.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
                     .disabled(authManager.isAuthenticating)
                     .padding(.horizontal, 20)
@@ -307,6 +334,9 @@ struct LoginView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .dismissKeyboardOnTap()
+            .background(FormaTheme.Colors.pageBackground.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showForgotPasswordSheet) {
                 PasswordRecoverySheet(initialEmail: emailText) {

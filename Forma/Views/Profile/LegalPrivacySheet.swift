@@ -194,13 +194,21 @@ struct PasswordRecoverySheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var authManager = AuthManager.shared
 
+    private enum RecoveryFocusField {
+        case email
+        case code
+        case newPassword
+    }
+
     @State private var emailText: String
     @State private var codeText: String = ""
     @State private var newPasswordText: String = ""
+    @State private var showNewPassword: Bool = false
     @State private var stepSentCode: Bool = false
     @State private var statusMessage: String? = nil
     @State private var errorMessage: String? = nil
     @State private var isSubmitting: Bool = false
+    @FocusState private var focusedField: RecoveryFocusField?
 
     var onRecoverySuccess: () -> Void
 
@@ -222,39 +230,80 @@ struct PasswordRecoverySheet: View {
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             Image(systemName: "envelope.fill")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(focusedField == .email ? FormaTheme.Colors.brand : .secondary)
                                 .frame(width: 20)
                             TextField("Seu e-mail cadastrado", text: $emailText)
                                 .keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .focused($focusedField, equals: .email)
                         }
                         .padding(14)
                         .background(FormaTheme.Colors.cardSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(
+                                    focusedField == .email ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                    lineWidth: focusedField == .email ? 1.4 : 0.8
+                                )
+                        )
 
                         if stepSentCode {
                             HStack(spacing: 12) {
                                 Image(systemName: "number")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(focusedField == .code ? FormaTheme.Colors.brand : .secondary)
                                     .frame(width: 20)
                                 TextField("Código de 6 dígitos", text: $codeText)
                                     .keyboardType(.numberPad)
+                                    .focused($focusedField, equals: .code)
                             }
                             .padding(14)
                             .background(FormaTheme.Colors.cardSurface)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(
+                                        focusedField == .code ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                        lineWidth: focusedField == .code ? 1.4 : 0.8
+                                    )
+                            )
 
                             HStack(spacing: 12) {
                                 Image(systemName: "lock.fill")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(focusedField == .newPassword ? FormaTheme.Colors.brand : .secondary)
                                     .frame(width: 20)
-                                SecureField("Nova senha (mín. 6 caracteres)", text: $newPasswordText)
-                                    .textContentType(.newPassword)
+                                Group {
+                                    if showNewPassword {
+                                        TextField("Nova senha (mín. 6 caracteres)", text: $newPasswordText)
+                                            .textInputAutocapitalization(.never)
+                                            .autocorrectionDisabled()
+                                    } else {
+                                        SecureField("Nova senha (mín. 6 caracteres)", text: $newPasswordText)
+                                    }
+                                }
+                                .textContentType(.newPassword)
+                                .focused($focusedField, equals: .newPassword)
+
+                                Button {
+                                    showNewPassword.toggle()
+                                } label: {
+                                    Image(systemName: showNewPassword ? "eye.slash.fill" : "eye.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
                             }
                             .padding(14)
                             .background(FormaTheme.Colors.cardSurface)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(
+                                        focusedField == .newPassword ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                        lineWidth: focusedField == .newPassword ? 1.4 : 0.8
+                                    )
+                            )
                         }
                     }
 
@@ -282,7 +331,7 @@ struct PasswordRecoverySheet: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(FormaTheme.Colors.brand)
+                        .background(FormaTheme.Colors.brandGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .disabled(isSubmitting)
@@ -354,10 +403,18 @@ struct ChangePasswordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var authManager = AuthManager.shared
 
+    private enum ChangeFocusField {
+        case current
+        case newPassword
+    }
+
     @State private var currentPassword: String = ""
     @State private var newPassword: String = ""
+    @State private var showCurrentPassword: Bool = false
+    @State private var showNewPassword: Bool = false
     @State private var errorMessage: String? = nil
     @State private var isSaving: Bool = false
+    @FocusState private var focusedField: ChangeFocusField?
 
     var onSaved: () -> Void
 
@@ -369,17 +426,77 @@ struct ChangePasswordSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    SecureField("Senha atual", text: $currentPassword)
+                    HStack(spacing: 12) {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(focusedField == .current ? FormaTheme.Colors.brand : .secondary)
+                            .frame(width: 20)
+                        Group {
+                            if showCurrentPassword {
+                                TextField("Senha atual", text: $currentPassword)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField("Senha atual", text: $currentPassword)
+                            }
+                        }
                         .textContentType(.password)
-                        .padding(14)
-                        .background(FormaTheme.Colors.cardSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .focused($focusedField, equals: .current)
 
-                    SecureField("Nova senha (mín. 6 caracteres)", text: $newPassword)
+                        Button {
+                            showCurrentPassword.toggle()
+                        } label: {
+                            Image(systemName: showCurrentPassword ? "eye.slash.fill" : "eye.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(14)
+                    .background(FormaTheme.Colors.cardSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(
+                                focusedField == .current ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                lineWidth: focusedField == .current ? 1.4 : 0.8
+                            )
+                    )
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "key.fill")
+                            .foregroundStyle(focusedField == .newPassword ? FormaTheme.Colors.brand : .secondary)
+                            .frame(width: 20)
+                        Group {
+                            if showNewPassword {
+                                TextField("Nova senha (mín. 6 caracteres)", text: $newPassword)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField("Nova senha (mín. 6 caracteres)", text: $newPassword)
+                            }
+                        }
                         .textContentType(.newPassword)
-                        .padding(14)
-                        .background(FormaTheme.Colors.cardSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .focused($focusedField, equals: .newPassword)
+
+                        Button {
+                            showNewPassword.toggle()
+                        } label: {
+                            Image(systemName: showNewPassword ? "eye.slash.fill" : "eye.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(14)
+                    .background(FormaTheme.Colors.cardSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(
+                                focusedField == .newPassword ? FormaTheme.Colors.brand : Color.primary.opacity(0.08),
+                                lineWidth: focusedField == .newPassword ? 1.4 : 0.8
+                            )
+                    )
 
                     if let errorMessage {
                         FormaBanner(message: errorMessage, style: .error)
@@ -398,7 +515,7 @@ struct ChangePasswordSheet: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(FormaTheme.Colors.brand)
+                        .background(FormaTheme.Colors.brandGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .disabled(isSaving)

@@ -63,12 +63,12 @@ struct ProfileDailyGoalsCard: View {
                         Spacer()
                         Text("\(Int(profile.targetSteps)) passos")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                            .foregroundStyle(FormaTheme.Colors.brand)
                     }
                     Slider(value: $profile.targetSteps, in: 3000...20000, step: 500) { editing in
                         if !editing { onContextSliderEnded() }
                     }
-                    .tint(.blue)
+                    .tint(FormaTheme.Colors.brand)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -142,11 +142,25 @@ struct ProfileMacroGoalsCard: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer()
-                        Text("P \(pPct)% • C \(cPct)% • G \(fPct)% (\(Int(totalMacroCalories.rounded())) kcal)")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                        HStack(spacing: 6) {
+                            HStack(spacing: 3) {
+                                Circle().fill(FormaTheme.Colors.protein).frame(width: 6, height: 6)
+                                Text("P \(pPct)%")
+                            }
+                            HStack(spacing: 3) {
+                                Circle().fill(FormaTheme.Colors.carbs).frame(width: 6, height: 6)
+                                Text("C \(cPct)%")
+                            }
+                            HStack(spacing: 3) {
+                                Circle().fill(FormaTheme.Colors.fat).frame(width: 6, height: 6)
+                                Text("G \(fPct)%")
+                            }
+                            Text("(\(Int(totalMacroCalories.rounded())) kcal)")
+                        }
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     }
 
                     GeometryReader { geo in
