@@ -1,4 +1,14 @@
 <resources>
     <string name="app_name">Forma</string>
     <string name="app_tagline">Nutrição &amp; Treinos Inteligentes</string>
+
+    <!-- Abas (TabView.swift) -->
+    <string name="tab_home">Início</string>
+    <string name="tab_nutrition">Alimentação</string>
+    <string name="tab_workouts">Treinos</string>
+    <string name="tab_evolution">Evolução</string>
+    <string name="tab_profile">Perfil</string>
+
+    <string name="loading_account">Carregando sua conta...</string>
+    <string name="splash_loading">Iniciando...</string>
 </resources>

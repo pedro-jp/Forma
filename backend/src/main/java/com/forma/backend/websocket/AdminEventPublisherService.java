@@ -1,17 +1,32 @@
 package com.forma.backend.websocket;
 
 import com.forma.backend.entity.AiRequestLogEntity;
+import com.forma.backend.entity.User;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class AdminEventPublisherService {
 
     private final AdminWebSocketHandler webSocketHandler;
+    private final UserAccountWebSocketHandler userAccountWebSocketHandler;
 
     public AdminEventPublisherService(AdminWebSocketHandler webSocketHandler) {
+        this(webSocketHandler, null);
+    }
+
+    @Autowired
+    public AdminEventPublisherService(
+        AdminWebSocketHandler webSocketHandler,
+        UserAccountWebSocketHandler userAccountWebSocketHandler
+    ) {
         this.webSocketHandler = webSocketHandler;
+        this.userAccountWebSocketHandler = userAccountWebSocketHandler;
     }
 
     public void publishAiRequest(AiRequestLogEntity log, long totalAiRequests) {
@@ -58,5 +73,28 @@ public class AdminEventPublisherService {
             "activeApiKeyMasked", keyMasked,
             "geminiModel", model
         ));
+    }
+
+    public void publishUserAccountState(User user, String eventName) {
+        if (userAccountWebSocketHandler == null || user == null) return;
+        runAfterCommitOrNow(() -> userAccountWebSocketHandler.sendAccountStateToUser(user, eventName));
+    }
+
+    public void publishUserAccountDeleted(UUID userId) {
+        if (userAccountWebSocketHandler == null || userId == null) return;
+        runAfterCommitOrNow(() -> userAccountWebSocketHandler.sendAccountDeletedToUser(userId));
+    }
+
+    private void runAfterCommitOrNow(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }

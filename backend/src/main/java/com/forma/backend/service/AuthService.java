@@ -468,6 +468,7 @@ public class AuthService {
             user.getEmail(),
             user.getName(),
             user.getAuthProvider(),
+            user.getAccountTier(),
             SyncDto.ProfileDto.fromEntity(profile)
         );
     }

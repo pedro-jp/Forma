@@ -1,606 +1,541 @@
 package com.forma.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.forma.app.R
+import com.forma.app.data.auth.GoogleAuthService
+import com.forma.app.data.remote.FormaApiException
 import com.forma.app.data.repository.FormaRepository
-import com.forma.app.ui.theme.DarkSurface
-import com.forma.app.ui.theme.PrimaryGreen
+import com.forma.app.ui.components.FormaBanner
+import com.forma.app.ui.components.FormaBannerStyle
+import com.forma.app.ui.components.formaPlainClickable
+import com.forma.app.ui.components.sfSymbol
+import com.forma.app.ui.screens.auth.AuthTextField
+import com.forma.app.ui.screens.auth.PasswordRecoverySheet
+import com.forma.app.ui.screens.auth.findActivity
+import com.forma.app.ui.screens.profile.LegalPrivacySheet
+import com.forma.app.ui.theme.FormaTheme
+import com.forma.app.ui.theme.FormaTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.security.SecureRandom
 
+/** Login social pendente de confirmação de conta existente (PendingSocialSignIn do iOS). */
+private data class PendingSocialSignIn(
+    val provider: String,
+    val providerId: String,
+    val email: String?,
+    val name: String,
+    val idToken: String?,
+    val nonce: String?,
+    val authorizationCode: String?,
+    val oauthRefreshToken: String?,
+    val existingEmail: String
+)
+
+/**
+ * Porte de Forma/Views/Auth/LoginView.swift (Android: sem Sign in with Apple; Google via OAuth 2.0 + PKCE).
+ */
 @Composable
 fun LoginScreen(
     repository: FormaRepository,
     onLoginSuccess: () -> Unit
 ) {
-    val coroutineScope = rememberCoroutineScope()
+    val colors = FormaTheme.Colors
+    val auth = repository.auth
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
     var isRegisterMode by remember { mutableStateOf(false) }
+    var nameText by remember { mutableStateOf("") }
+    var emailText by remember { mutableStateOf("") }
+    var passwordText by remember { mutableStateOf("") }
 
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
+    var localErrorMessage by remember { mutableStateOf<String?>(null) }
+    var showForgotPasswordSheet by remember { mutableStateOf(false) }
+    var showLegalPrivacySheet by remember { mutableStateOf(false) }
+    var isGoogleAuthenticating by remember { mutableStateOf(false) }
+    var showExistingAccountAlert by remember { mutableStateOf(false) }
+    var pendingSocialSignIn by remember { mutableStateOf<PendingSocialSignIn?>(null) }
+    var acceptedTermsAndLGPD by remember { mutableStateOf(false) }
 
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var infoMessage by remember { mutableStateOf<String?>(null) }
+    val isAuthenticating by auth.isAuthenticating.collectAsState()
+    val authError by auth.errorMessage.collectAsState()
 
-    var showServerConfigDialog by remember { mutableStateOf(false) }
-    var serverUrl by remember { mutableStateOf(repository.backendClient.baseUrl) }
+    fun handleEmailAuth() {
+        localErrorMessage = null
+        if (isRegisterMode && !acceptedTermsAndLGPD) {
+            localErrorMessage = "Marque o aceite da Política de Privacidade (LGPD) e dos Termos de Uso para criar sua conta."
+            return
+        }
+        scope.launch {
+            try {
+                if (isRegisterMode) auth.register(nameText, emailText, passwordText)
+                else auth.login(emailText, passwordText)
+                onLoginSuccess()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                localErrorMessage = e.localizedMessage ?: e.toString()
+            }
+        }
+    }
 
-    var showGoogleModal by remember { mutableStateOf(false) }
-    var showAppleModal by remember { mutableStateOf(false) }
+    fun handleGoogleSignIn() {
+        val activity = context.findActivity() ?: return
+        localErrorMessage = null
+        isGoogleAuthenticating = true
+        val rawNonce = randomNonceString()
 
-    var socialEmailInput by remember { mutableStateOf("") }
-    var socialNameInput by remember { mutableStateOf("") }
+        scope.launch {
+            try {
+                val userResult = GoogleAuthService.get(context).startSignIn(activity, auth.api, rawNonce)
+                val resolvedProviderId = userResult.sub ?: "google_user_${kotlin.math.abs(rawNonce.hashCode())}"
+                val resolvedName = userResult.name ?: "Usuário Google"
+                val googleRevocableToken =
+                    if (!userResult.refreshToken.isNullOrEmpty()) userResult.refreshToken else userResult.accessToken
+                try {
+                    auth.loginWithSocial(
+                        provider = "GOOGLE",
+                        providerId = resolvedProviderId,
+                        email = userResult.email,
+                        name = resolvedName,
+                        idToken = userResult.idToken,
+                        nonce = rawNonce,
+                        isRegisterIntent = isRegisterMode,
+                        confirmExisting = false,
+                        oauthRefreshToken = googleRevocableToken
+                    )
+                    onLoginSuccess()
+                } catch (e: FormaApiException.AccountAlreadyExists) {
+                    pendingSocialSignIn = PendingSocialSignIn(
+                        provider = "GOOGLE",
+                        providerId = resolvedProviderId,
+                        email = userResult.email,
+                        name = resolvedName,
+                        idToken = userResult.idToken,
+                        nonce = rawNonce,
+                        authorizationCode = null,
+                        oauthRefreshToken = googleRevocableToken,
+                        existingEmail = e.email.ifEmpty { userResult.email.orEmpty() }
+                    )
+                    showExistingAccountAlert = true
+                }
+            } catch (e: CancellationException) {
+                // Usuário fechou a aba de login do Google
+            } catch (e: Exception) {
+                localErrorMessage = e.localizedMessage ?: e.toString()
+            } finally {
+                isGoogleAuthenticating = false
+            }
+        }
+    }
 
-    Box(
+    fun confirmPendingSocialSignIn() {
+        val pending = pendingSocialSignIn ?: return
+        pendingSocialSignIn = null
+        localErrorMessage = null
+        isGoogleAuthenticating = true
+        scope.launch {
+            try {
+                auth.loginWithSocial(
+                    provider = pending.provider,
+                    providerId = pending.providerId,
+                    email = pending.email,
+                    name = pending.name,
+                    idToken = pending.idToken,
+                    nonce = pending.nonce,
+                    isRegisterIntent = false,
+                    confirmExisting = true,
+                    authorizationCode = pending.authorizationCode,
+                    oauthRefreshToken = pending.oauthRefreshToken
+                )
+                onLoginSuccess()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                localErrorMessage = e.localizedMessage ?: e.toString()
+            } finally {
+                isGoogleAuthenticating = false
+            }
+        }
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0F172A),
-                        Color(0xFF090D16),
-                        Color(0xFF030712)
-                    )
-                )
-            )
-            .padding(24.dp)
+            .background(colors.systemBackground)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
+        // Header com Logo e Apresentação
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.padding(top = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Spacer(modifier = Modifier.height(58.dp))
-
-            // Logo & Header
-            Box(
+            androidx.compose.foundation.Image(
+                painter = painterResource(id = R.drawable.app_logo),
+                contentDescription = "Forma",
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
-                    .size(80.dp)
-                    .clip(CircleShape)
-                    .background(PrimaryGreen.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.FitnessCenter,
-                    contentDescription = "Forma Logo",
-                    tint = PrimaryGreen,
-                    modifier = Modifier.size(44.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
+                    .size(72.dp)
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = RoundedCornerShape(16.dp),
+                        ambientColor = colors.brand.copy(alpha = 0.25f),
+                        spotColor = colors.brand.copy(alpha = 0.25f)
+                    )
+                    .clip(RoundedCornerShape(16.dp))
+            )
             Text(
                 text = "Forma",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = colors.primaryText,
+                style = FormaTypography.rounded(28f, FontWeight.ExtraBold)
             )
-
             Text(
-                text = "Nutrição, Treinos & IA Personalizada",
-                fontSize = 14.sp,
-                color = Color(0xFF94A3B8),
-                textAlign = TextAlign.Center
+                text = if (isRegisterMode) "Crie sua conta para gerenciar seus dados" else "Entre na sua conta para acessar seus dados",
+                color = colors.secondaryText,
+                style = FormaTypography.subheadline,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+        }
+
+        // Seletor de Modo: Entrar vs Criar Conta
+        AuthSegmentedPicker(
+            options = listOf("Entrar", "Criar Conta"),
+            selectedIndex = if (isRegisterMode) 1 else 0,
+            onSelect = { isRegisterMode = it == 1 },
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        // Formulário de E-mail / Senha
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            AnimatedVisibility(visible = isRegisterMode) {
+                AuthTextField(
+                    icon = sfSymbol("person.fill"),
+                    placeholder = "Seu Nome Completo",
+                    value = nameText,
+                    onValueChange = { nameText = it }
+                )
+            }
+            AuthTextField(
+                icon = sfSymbol("envelope.fill"),
+                placeholder = "E-mail",
+                value = emailText,
+                onValueChange = { emailText = it },
+                keyboardType = KeyboardType.Email
+            )
+            AuthTextField(
+                icon = sfSymbol("lock.fill"),
+                placeholder = "Senha",
+                value = passwordText,
+                onValueChange = { passwordText = it },
+                isPassword = true,
+                imeAction = ImeAction.Done,
+                onImeAction = { handleEmailAuth() }
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Tab Selector (Entrar / Cadastrar)
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF1E293B),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            if (!isRegisterMode) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Text(
+                        text = "Esqueci minha senha",
+                        color = colors.brand,
+                        style = FormaTypography.caption.copy(fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.formaPlainClickable { showForgotPasswordSheet = true }
+                    )
+                }
+            } else {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(4.dp)
+                        .padding(horizontal = 4.dp)
+                        .padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    TabItem(
-                        title = "Entrar",
-                        isSelected = !isRegisterMode,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        isRegisterMode = false
-                        errorMessage = null
-                    }
-                    TabItem(
-                        title = "Criar Conta",
-                        isSelected = isRegisterMode,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        isRegisterMode = true
-                        errorMessage = null
+                    Icon(
+                        imageVector = if (acceptedTermsAndLGPD) Icons.Filled.CheckBox
+                        else Icons.Filled.CheckBoxOutlineBlank,
+                        contentDescription = null,
+                        tint = if (acceptedTermsAndLGPD) colors.brand else colors.secondaryText,
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .size(22.dp)
+                            .formaPlainClickable { acceptedTermsAndLGPD = !acceptedTermsAndLGPD }
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = "Li e aceito a Política de Privacidade (LGPD), os Termos de Uso e o tratamento dos meus dados de bem-estar.",
+                            color = colors.secondaryText,
+                            style = FormaTypography.caption,
+                            modifier = Modifier.formaPlainClickable { acceptedTermsAndLGPD = !acceptedTermsAndLGPD }
+                        )
+                        Text(
+                            text = "Ler Política, Termos (EULA) e Aviso de Saúde",
+                            color = colors.brand,
+                            style = FormaTypography.caption.copy(fontWeight = FontWeight.SemiBold),
+                            modifier = Modifier.formaPlainClickable { showLegalPrivacySheet = true }
+                        )
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Inputs
-            if (isRegisterMode) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Nome completo") },
-                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = PrimaryGreen) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PrimaryGreen,
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedLabelColor = PrimaryGreen,
-                        unfocusedLabelColor = Color(0xFF94A3B8),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = { Text("E-mail") },
-                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = PrimaryGreen) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = PrimaryGreen,
-                    unfocusedBorderColor = Color(0xFF334155),
-                    focusedLabelColor = PrimaryGreen,
-                    unfocusedLabelColor = Color(0xFF94A3B8),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+        // Alerta de Erro
+        (localErrorMessage ?: authError)?.let { error ->
+            FormaBanner(
+                message = error,
+                style = FormaBannerStyle.Error,
+                modifier = Modifier.padding(horizontal = 20.dp)
             )
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Senha") },
-                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = PrimaryGreen) },
-                trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Ver senha",
-                            tint = Color(0xFF94A3B8)
-                        )
-                    }
-                },
-                singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = PrimaryGreen,
-                    unfocusedBorderColor = Color(0xFF334155),
-                    focusedLabelColor = PrimaryGreen,
-                    unfocusedLabelColor = Color(0xFF94A3B8),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+        // Botão Principal (Entrar / Cadastrar)
+        val primaryShape = RoundedCornerShape(14.dp)
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth()
+                .height(50.dp)
+                .alpha(if (isAuthenticating) 0.5f else 1f)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = primaryShape,
+                    ambientColor = colors.brand.copy(alpha = 0.3f),
+                    spotColor = colors.brand.copy(alpha = 0.3f)
+                )
+                .clip(primaryShape)
+                .background(Brush.horizontalGradient(listOf(colors.brand, colors.green)))
+                .formaPlainClickable(enabled = !isAuthenticating) { handleEmailAuth() },
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isAuthenticating) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+            }
+            Text(
+                text = if (isRegisterMode) "Criar Minha Conta" else "Entrar com E-mail",
+                color = Color.White,
+                style = FormaTypography.system(16f, FontWeight.Bold)
             )
+        }
 
-            if (errorMessage != null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = errorMessage ?: "",
-                    color = Color(0xFFEF4444),
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
+        // Divisor "ou continue com"
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 4.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(Modifier.weight(1f).height(1.dp).background(colors.secondaryText.copy(alpha = 0.2f)))
+            Text("ou continue com", color = colors.secondaryText, style = FormaTypography.caption)
+            Box(Modifier.weight(1f).height(1.dp).background(colors.secondaryText.copy(alpha = 0.2f)))
+        }
 
-            if (infoMessage != null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = infoMessage ?: "",
-                    color = PrimaryGreen,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Action Button
-            Button(
-                onClick = {
-                    if (email.isBlank() || password.isBlank() || (isRegisterMode && name.isBlank())) {
-                        errorMessage = "Preencha todos os campos obrigatórios."
-                        return@Button
-                    }
-                    isLoading = true
-                    errorMessage = null
-                    coroutineScope.launch {
-                        val result = if (isRegisterMode) {
-                            repository.register(name, email, password)
-                        } else {
-                            repository.login(email, password)
-                        }
-                        isLoading = false
-                        if (result.isSuccess) {
-                            onLoginSuccess()
-                        } else {
-                            errorMessage = result.exceptionOrNull()?.message ?: "Erro ao autenticar."
-                        }
-                    }
-                },
-                enabled = !isLoading,
+        // Botões de autenticação social (Apple Sign-In não existe no Android)
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            val googleEnabled = !(isGoogleAuthenticating || isAuthenticating)
+            val googleShape = RoundedCornerShape(14.dp)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryGreen,
-                    contentColor = Color.Black
-                )
+                    .height(50.dp)
+                    .alpha(if (googleEnabled) 1f else 0.5f)
+                    .clip(googleShape)
+                    .background(colors.cardSurface)
+                    .border(1.dp, colors.primary.copy(alpha = 0.12f), googleShape)
+                    .formaPlainClickable(enabled = googleEnabled) { handleGoogleSignIn() },
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = Color.Black,
-                        strokeWidth = 2.dp
-                    )
+                if (isGoogleAuthenticating) {
+                    CircularProgressIndicator(color = colors.blue, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 } else {
-                    Text(
-                        text = if (isRegisterMode) "Cadastrar e Iniciar" else "Entrar no Forma",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // g.circle.fill
+                    Box(
+                        modifier = Modifier.size(22.dp).clip(CircleShape).background(colors.blue),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("g", color = Color.White, style = FormaTypography.system(15f, FontWeight.Bold))
+                    }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Divider
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
                 Text(
-                    text = "ou continue com",
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Social Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Google Button
-                OutlinedButton(
-                    onClick = {
-                        socialEmailInput = "usuario.google@gmail.com"
-                        socialNameInput = "Usuário Google"
-                        showGoogleModal = true
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF1E293B).copy(alpha = 0.7f),
-                        contentColor = Color.White
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccountCircle,
-                        contentDescription = "Google",
-                        tint = Color(0xFFEA4335),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Google", fontSize = 14.sp)
-                }
-
-                // Apple Button
-                OutlinedButton(
-                    onClick = {
-                        socialEmailInput = "usuario.apple@icloud.com"
-                        socialNameInput = "Usuário Apple"
-                        showAppleModal = true
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF1E293B).copy(alpha = 0.7f),
-                        contentColor = Color.White
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PhoneIphone,
-                        contentDescription = "Apple",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Apple", fontSize = 14.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Guest / Offline Mode
-            TextButton(
-                onClick = {
-                    onLoginSuccess()
-                }
-            ) {
-                Text(
-                    text = "Continuar no modo offline / visitante",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 13.sp
+                    text = if (isGoogleAuthenticating) "Conectando com Google..." else "Continuar com Google",
+                    color = colors.primaryText,
+                    style = FormaTypography.system(16f, FontWeight.SemiBold)
                 )
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp)
+                .formaPlainClickable { showLegalPrivacySheet = true },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                "Recursos de IA na nuvem utilizam o Google Gemini (Google LLC) mediante sua autorização.",
+                color = colors.secondaryText,
+                style = FormaTypography.caption2,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                "Ao continuar, você concorda com a Política de Privacidade (LGPD), Termos de Uso & Aviso de Saúde",
+                color = colors.brand,
+                style = FormaTypography.caption.copy(fontWeight = FontWeight.SemiBold),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
 
-            // Server Config Shortcut
-            Row(
+    if (showForgotPasswordSheet) {
+        PasswordRecoverySheet(
+            auth = auth,
+            initialEmail = emailText,
+            onDismiss = { showForgotPasswordSheet = false },
+            onRecoverySuccess = onLoginSuccess
+        )
+    }
+    if (showLegalPrivacySheet) {
+        LegalPrivacySheet(onDismiss = { showLegalPrivacySheet = false })
+    }
+    if (showExistingAccountAlert) {
+        AlertDialog(
+            onDismissRequest = {
+                showExistingAccountAlert = false
+                pendingSocialSignIn = null
+            },
+            title = { Text("Conta já existente") },
+            text = {
+                Text("Já existe uma conta cadastrada com o e-mail ${pendingSocialSignIn?.existingEmail ?: "informado"}. Deseja entrar nessa conta?")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExistingAccountAlert = false
+                    confirmPendingSocialSignIn()
+                }) { Text("Sim, Entrar", color = colors.brand) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showExistingAccountAlert = false
+                    pendingSocialSignIn = null
+                }) { Text("Cancelar", color = colors.brand) }
+            },
+            containerColor = colors.cardSurface,
+            titleContentColor = colors.primaryText,
+            textContentColor = colors.secondaryText
+        )
+    }
+}
+
+/** `Picker(.segmented)` do iOS: trilho `tertiaryFill`, seletor branco (claro) / cinza (escuro). */
+@Composable
+private fun AuthSegmentedPicker(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = FormaTheme.Colors
+    val thumb = if (colors.isDark) Color(0xFF636366) else Color.White
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(colors.tertiaryFill)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        options.forEachIndexed { index, title ->
+            val selected = index == selectedIndex
+            Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { showServerConfigDialog = true }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .height(28.dp)
+                    .then(
+                        if (selected) Modifier
+                            .shadow(1.dp, RoundedCornerShape(7.dp))
+                            .background(thumb, RoundedCornerShape(7.dp))
+                        else Modifier
+                    )
+                    .formaPlainClickable { onSelect(index) },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Dns,
-                    contentDescription = "Configurar Servidor",
-                    tint = Color(0xFF64748B),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Servidor: ${serverUrl.replace("http://", "").replace("https://", "")}",
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp
+                    text = title,
+                    color = colors.primaryText,
+                    style = FormaTypography.system(13f, if (selected) FontWeight.SemiBold else FontWeight.Normal)
                 )
             }
-
-            Spacer(modifier = Modifier.height(58.dp))
-        }
-
-        // Google Dialog
-        if (showGoogleModal) {
-            AlertDialog(
-                onDismissRequest = { showGoogleModal = false },
-                title = { Text("Login com Google") },
-                text = {
-                    Column {
-                        Text(
-                            "Simule a autenticação do Google informando sua conta:",
-                            fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = socialNameInput,
-                            onValueChange = { socialNameInput = it },
-                            label = { Text("Nome da Conta") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = socialEmailInput,
-                            onValueChange = { socialEmailInput = it },
-                            label = { Text("E-mail Google") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showGoogleModal = false
-                            isLoading = true
-                            coroutineScope.launch {
-                                val result = repository.loginWithSocial(
-                                    provider = "GOOGLE",
-                                    email = socialEmailInput.trim(),
-                                    name = socialNameInput.trim().ifEmpty { "Usuário Google" },
-                                    providerId = "google_${System.currentTimeMillis()}"
-                                )
-                                isLoading = false
-                                if (result.isSuccess) {
-                                    onLoginSuccess()
-                                } else {
-                                    errorMessage = result.exceptionOrNull()?.message ?: "Erro no login Google."
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen, contentColor = Color.Black)
-                    ) {
-                        Text("Confirmar Login")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showGoogleModal = false }) {
-                        Text("Cancelar")
-                    }
-                }
-            )
-        }
-
-        // Apple Dialog
-        if (showAppleModal) {
-            AlertDialog(
-                onDismissRequest = { showAppleModal = false },
-                title = { Text("Login com Apple ID") },
-                text = {
-                    Column {
-                        Text(
-                            "Simule a autenticação segura do Sign in with Apple:",
-                            fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = socialNameInput,
-                            onValueChange = { socialNameInput = it },
-                            label = { Text("Nome da Apple ID") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = socialEmailInput,
-                            onValueChange = { socialEmailInput = it },
-                            label = { Text("E-mail Apple ID") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showAppleModal = false
-                            isLoading = true
-                            coroutineScope.launch {
-                                val result = repository.loginWithSocial(
-                                    provider = "APPLE",
-                                    email = socialEmailInput.trim(),
-                                    name = socialNameInput.trim().ifEmpty { "Usuário Apple" },
-                                    providerId = "apple_${System.currentTimeMillis()}"
-                                )
-                                isLoading = false
-                                if (result.isSuccess) {
-                                    onLoginSuccess()
-                                } else {
-                                    errorMessage = result.exceptionOrNull()?.message ?: "Erro no login Apple."
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen, contentColor = Color.Black)
-                    ) {
-                        Text("Confirmar Apple")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAppleModal = false }) {
-                        Text("Cancelar")
-                    }
-                }
-            )
-        }
-
-        // Server URL Dialog
-        if (showServerConfigDialog) {
-            var tempUrl by remember { mutableStateOf(serverUrl) }
-            AlertDialog(
-                onDismissRequest = { showServerConfigDialog = false },
-                title = { Text("Endereço do Servidor") },
-                text = {
-                    Column {
-                        Text(
-                            "Endereço do backend Java com Supabase (no emulador: http://10.0.2.2:8085):",
-                            fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = tempUrl,
-                            onValueChange = { tempUrl = it },
-                            label = { Text("URL Base") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            repository.backendClient.baseUrl = tempUrl.trim()
-                            serverUrl = tempUrl.trim()
-                            showServerConfigDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen, contentColor = Color.Black)
-                    ) {
-                        Text("Salvar")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showServerConfigDialog = false }) {
-                        Text("Cancelar")
-                    }
-                }
-            )
         }
     }
 }
 
-@Composable
-private fun TabItem(
-    title: String,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() },
-        color = if (isSelected) PrimaryGreen else Color.Transparent,
-        shape = RoundedCornerShape(10.dp)
-    ) {
-        Text(
-            text = title,
-            modifier = Modifier
-                .padding(vertical = 10.dp)
-                .fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            color = if (isSelected) Color.Black else Color(0xFF94A3B8),
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            fontSize = 14.sp
-        )
-    }
+private fun randomNonceString(length: Int = 32): String {
+    val charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._"
+    val random = SecureRandom()
+    val bytes = ByteArray(length).also { random.nextBytes(it) }
+    return buildString { bytes.forEach { append(charset[(it.toInt() and 0xFF) % charset.length]) } }
 }

@@ -16,15 +16,60 @@ public final class WorkoutNotificationManager: NSObject, UNUserNotificationCente
     public static let shared = WorkoutNotificationManager()
     
     private let restNotificationId = "forma_workout_rest_timer"
+    public static let restCategoryId = "WORKOUT_REST_CATEGORY"
+    public static let actionIncreaseHalfKgId = "ACTION_INCREASE_HALF_KG"
+    public static let actionIncreaseOneKgId = "ACTION_INCREASE_ONE_KG"
+    public static let actionDecreaseHalfKgId = "ACTION_DECREASE_HALF_KG"
+    public static let actionDecreaseOneKgId = "ACTION_DECREASE_ONE_KG"
+    public static let actionIncreaseWeightId = "ACTION_INCREASE_SET_WEIGHT"
+    public static let actionDecreaseWeightId = "ACTION_DECREASE_SET_WEIGHT"
+    public static let actionSkipRestId = "ACTION_SKIP_REST"
     
     private override init() {
         super.init()
     }
     
-    /// Inicializa delegate e solicita permissões necessárias
+    /// Inicializa delegate, categorias de ação de carga e solicita permissões necessárias
     public func setup() {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        registerWorkoutNotificationCategories()
         requestAuthorization()
+    }
+    
+    private func registerWorkoutNotificationCategories() {
+        let incOneAction = UNNotificationAction(
+            identifier: Self.actionIncreaseOneKgId,
+            title: "Aumentar (+1 kg)",
+            options: []
+        )
+        let incHalfAction = UNNotificationAction(
+            identifier: Self.actionIncreaseHalfKgId,
+            title: "Aumentar (+0.5 kg)",
+            options: []
+        )
+        let decHalfAction = UNNotificationAction(
+            identifier: Self.actionDecreaseHalfKgId,
+            title: "Reduzir (-0.5 kg)",
+            options: []
+        )
+        let decOneAction = UNNotificationAction(
+            identifier: Self.actionDecreaseOneKgId,
+            title: "Reduzir (-1 kg)",
+            options: []
+        )
+        let skipRestAction = UNNotificationAction(
+            identifier: Self.actionSkipRestId,
+            title: "Iniciar Série Agora",
+            options: []
+        )
+        let category = UNNotificationCategory(
+            identifier: Self.restCategoryId,
+            actions: [incOneAction, incHalfAction, decHalfAction, decOneAction, skipRestAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
     
     /// Solicita autorização para alertas, sons e avisos Time-Sensitive
@@ -196,15 +241,27 @@ public final class WorkoutNotificationManager: NSObject, UNUserNotificationCente
     public func scheduleRestNotification(
         seconds: Int,
         exerciseName: String,
-        nextSet: Int
+        nextSet: Int,
+        lastSetWeightKg: Double? = nil
     ) {
         cancelRestNotification()
         
         guard seconds > 0 else { return }
         
+        let resolvedWeight = lastSetWeightKg
+            ?? SharedWorkoutSessionManager.shared.loadSession()?.lastCompletedSetInfo?.weightKg
+            ?? SharedWorkoutSessionManager.shared.loadSession()?.currentSetWeightKg
+            ?? 0.0
+        let weightLabel = resolvedWeight > 0 ? " (\(WorkoutExerciseItem.formatWeightKg(resolvedWeight)))" : ""
+        
         let content = UNMutableNotificationContent()
         content.title = "Descanso Concluído! ⏱️"
-        content.body = "Hora de iniciar a Série \(nextSet) de \(exerciseName)!"
+        if resolvedWeight > 0 {
+            content.body = "Hora da Série \(nextSet) de \(exerciseName)\(weightLabel)! Segure para ajustar a carga (+0.5kg / +1kg / -0.5kg / -1kg)."
+        } else {
+            content.body = "Hora de iniciar a Série \(nextSet) de \(exerciseName)!"
+        }
+        content.categoryIdentifier = Self.restCategoryId
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.relevanceScore = 1.0
@@ -267,5 +324,34 @@ public final class WorkoutNotificationManager: NSObject, UNUserNotificationCente
         // Quando a notificação chega com o app em primeiro plano: vibra intensamente e mostra banner
         triggerRestFinishedHapticsAndSound()
         completionHandler([.banner, .sound, .list])
+    }
+    
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let actionId = response.actionIdentifier
+        Task {
+            switch actionId {
+            case Self.actionIncreaseOneKgId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 1.0)
+            case Self.actionIncreaseHalfKgId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 0.5)
+            case Self.actionDecreaseHalfKgId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -0.5)
+            case Self.actionDecreaseOneKgId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -1.0)
+            case Self.actionIncreaseWeightId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 2.0)
+            case Self.actionDecreaseWeightId:
+                await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -2.0)
+            case Self.actionSkipRestId:
+                await SharedWorkoutSessionManager.shared.skipRestFromLiveActivity()
+            default:
+                break
+            }
+            completionHandler()
+        }
     }
 }

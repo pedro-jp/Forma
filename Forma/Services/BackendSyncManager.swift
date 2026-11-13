@@ -603,6 +603,10 @@ public final class BackendSyncManager: ObservableObject {
             return
         }
 
+        if let remoteTier = json["accountTier"] as? String {
+            AuthManager.shared.updateAccountTier(remoteTier)
+        }
+
         let resetAckKey = "forma_reset_ack_\(userId)"
         let localAck = UserDefaults.standard.object(forKey: resetAckKey) as? Int64 ?? 0
         if let forceResetNum = json["forceResetEpochMs"] as? NSNumber {

@@ -1,4 +1,14 @@
 <resources>
+    <!-- Cores do Design System (Assets.xcassets / modo claro) -->
+    <color name="forma_accent">#54E1C3</color>
+    <color name="forma_accent_green">#D4F782</color>
+    <color name="forma_accent_minor">#183C36</color>
+    <color name="forma_card_background">#FEFFFF</color>
+    <color name="forma_font_normal">#000000</color>
+    <color name="forma_page_background">#F2F2F7</color>
+    <color name="forma_system_background">#FFFFFF</color>
+
+    <!-- Legado (tema escuro anterior) -->
     <color name="accent_green">#22C55E</color>
     <color name="accent_dark">#15803D</color>
     <color name="bg_dark">#121214</color>

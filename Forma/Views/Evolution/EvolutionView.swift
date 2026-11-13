@@ -34,6 +34,7 @@ struct EvolutionView: View {
     @State private var selectedSection: EvolutionSection = .overview
     @StateObject private var healthVM = HealthViewModel()
     @ObservedObject private var aiConsent = AIDataConsentManager.shared
+    @ObservedObject private var authManager = AuthManager.shared
 
     @State private var showLogWeight: Bool = false
     @State private var showAIConsentSheet: Bool = false
@@ -44,6 +45,7 @@ struct EvolutionView: View {
     @State private var aiErrorMessage: String? = nil
     @State private var savedRoutineSuccessfully: Bool = false
     @State private var appliedTargetsSuccessfully: Bool = false
+    @State private var evolutionAnalysisTask: Task<Void, Never>? = nil
 
     private var profile: Profile? { profiles.first }
 
@@ -138,20 +140,24 @@ struct EvolutionView: View {
 
                 ScrollView {
                     VStack(spacing: FormaTheme.Spacing.sectionGap) {
-                        switch selectedSection {
-                        case .overview:
+                        if authManager.isPro {
+                            switch selectedSection {
+                            case .overview:
+                                overviewSectionView
+                            case .aiAnalysis:
+                                EvolutionAICoachSection(
+                                    analysis: aiAnalysis,
+                                    isAnalyzing: isAnalyzingAI,
+                                    errorMessage: aiErrorMessage,
+                                    appliedTargetsSuccessfully: appliedTargetsSuccessfully,
+                                    savedRoutineSuccessfully: savedRoutineSuccessfully,
+                                    onGenerateAnalysis: generateAIAnalysis,
+                                    onApplyTargets: applySuggestedTargets,
+                                    onSaveRoutine: saveRecommendedRoutine
+                                )
+                            }
+                        } else {
                             overviewSectionView
-                        case .aiAnalysis:
-                            EvolutionAICoachSection(
-                                analysis: aiAnalysis,
-                                isAnalyzing: isAnalyzingAI,
-                                errorMessage: aiErrorMessage,
-                                appliedTargetsSuccessfully: appliedTargetsSuccessfully,
-                                savedRoutineSuccessfully: savedRoutineSuccessfully,
-                                onGenerateAnalysis: generateAIAnalysis,
-                                onApplyTargets: applySuggestedTargets,
-                                onSaveRoutine: saveRecommendedRoutine
-                            )
                         }
                     }
                     .padding(.top, 16)
@@ -173,7 +179,22 @@ struct EvolutionView: View {
             .onAppear {
                 healthVM.loadHealthData()
                 FormaDataStore.shared.syncExternalHealthWorkoutsInBackground(in: modelContext)
-                if aiAnalysis == nil {
+                if !authManager.isPro {
+                    selectedSection = .overview
+                } else if aiAnalysis == nil {
+                    aiAnalysis = EvolutionAnalysisStore.shared.latestAnalysis ?? EvolutionAnalysisStore.shared.loadLatest()
+                }
+            }
+            .onChange(of: authManager.accountTier) { _, newTier in
+                if newTier == .free {
+                    evolutionAnalysisTask?.cancel()
+                    isAnalyzingAI = false
+                    showAIConsentSheet = false
+                    aiErrorMessage = nil
+                    withAnimation(.spring(duration: 0.3)) {
+                        selectedSection = .overview
+                    }
+                } else if aiAnalysis == nil {
                     aiAnalysis = EvolutionAnalysisStore.shared.latestAnalysis ?? EvolutionAnalysisStore.shared.loadLatest()
                 }
             }
@@ -183,8 +204,8 @@ struct EvolutionView: View {
     private var topHeaderBar: some View {
         VStack(spacing: 12) {
             FormaScreenHeader(
-                title: "Evolução & Análise",
-                subtitle: "Seu progresso e Inteligência Forma"
+                title: authManager.isPro ? "Evolução & Análise" : "Evolução Corporal",
+                subtitle: authManager.isPro ? "Seu progresso e Inteligência Forma" : "Peso, calorias e consistência semanal"
             ) {
                 Button {
                     showLogWeight = true
@@ -206,32 +227,34 @@ struct EvolutionView: View {
             .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
             .padding(.top, 8)
 
-            HStack(spacing: 4) {
-                ForEach(EvolutionSection.allCases) { section in
-                    Button {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                            selectedSection = section
+            if authManager.isPro {
+                HStack(spacing: 4) {
+                    ForEach(EvolutionSection.allCases) { section in
+                        Button {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                selectedSection = section
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: section.icon)
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(section.rawValue)
+                                    .font(.system(size: 12.5, weight: selectedSection == section ? .bold : .medium))
+                            }
+                            .foregroundStyle(selectedSection == section ? .white : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(selectedSection == section ? FormaTheme.Colors.brand : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: section.icon)
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(section.rawValue)
-                                .font(.system(size: 12.5, weight: selectedSection == section ? .bold : .medium))
-                        }
-                        .foregroundStyle(selectedSection == section ? .white : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(selectedSection == section ? FormaTheme.Colors.brand : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(3)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
             }
-            .padding(3)
-            .background(Color.primary.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(.horizontal, FormaTheme.Spacing.screenHorizontal)
         }
         .padding(.bottom, 12)
         .background(FormaTheme.Colors.cardSurface)
@@ -467,14 +490,19 @@ struct EvolutionView: View {
     }
 
     private func generateAIAnalysis() {
-        if !aiConsent.hasGrantedConsent {
-            showAIConsentSheet = true
+        guard authManager.isPro else {
+            selectedSection = .overview
             return
+        }
+        if !aiConsent.hasGrantedConsent {
+            aiConsent.setConsent(true)
         }
         performEvolutionAIAnalysis()
     }
 
     private func performEvolutionAIAnalysis() {
+        guard authManager.isPro else { return }
+        evolutionAnalysisTask?.cancel()
         isAnalyzingAI = true
         aiErrorMessage = nil
         appliedTargetsSuccessfully = false
@@ -487,7 +515,7 @@ struct EvolutionView: View {
             weights: weightEntries
         )
 
-        Task {
+        evolutionAnalysisTask = Task {
             do {
                 let result = try await GeminiAIService.shared.analyzeEvolution(
                     foods: foodEntries,
@@ -496,17 +524,28 @@ struct EvolutionView: View {
                     weights: weightEntries,
                     profile: profile
                 )
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.authManager.isPro else {
+                        self.isAnalyzingAI = false
+                        return
+                    }
                     self.aiAnalysis = result
                     self.isAnalyzingAI = false
                     Task { @MainActor in
                         try? await FormaDataStore.shared.saveEvolutionAnalysisRemoteFirst(result)
                     }
                 }
-            } catch {
+            } catch is CancellationError {
                 await MainActor.run {
-                    self.aiErrorMessage = FormaAPIClient.humanizeErrorMessage(error.localizedDescription)
                     self.isAnalyzingAI = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.isAnalyzingAI = false
+                    guard self.authManager.isPro else { return }
+                    self.aiErrorMessage = FormaAPIClient.humanizeErrorMessage(error.localizedDescription)
                 }
             }
         }

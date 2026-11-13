@@ -333,6 +333,34 @@ public class SyncDto {
         List<AiAnalysisDto> analyses,
         List<ActivityLogDto> activityLogs,
         Instant syncedAt,
-        Long forceResetEpochMs
-    ) {}
+        Long forceResetEpochMs,
+        String accountTier
+    ) {
+        public SyncPullResponse(
+            ProfileDto profile,
+            List<FoodDto> foods,
+            List<WorkoutDto> workouts,
+            List<WaterDto> waters,
+            List<WeightDto> weights,
+            List<RoutineDto> routines,
+            List<AiAnalysisDto> analyses,
+            List<ActivityLogDto> activityLogs,
+            Instant syncedAt,
+            Long forceResetEpochMs
+        ) {
+            this(
+                profile,
+                foods,
+                workouts,
+                waters,
+                weights,
+                routines,
+                analyses,
+                activityLogs,
+                syncedAt,
+                forceResetEpochMs,
+                "FREE"
+            );
+        }
+    }
 }

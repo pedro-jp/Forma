@@ -10,10 +10,12 @@ import SwiftData
 
 struct MainView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var profiles: [Profile]
     @ObservedObject private var router = AppNavigationRouter.shared
     @ObservedObject private var syncManager = BackendSyncManager.shared
     @ObservedObject private var authManager = AuthManager.shared
+    @State private var lastForegroundSyncCheck: Date = .distantPast
 
     private var primaryProfile: Profile? {
         profiles.first
@@ -71,10 +73,47 @@ struct MainView: View {
                 .tint(Color("AccentColor"))
             }
         }
+        .overlay(alignment: .top) {
+            if let toast = authManager.realtimeToastMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: authManager.isPro ? "sparkles" : "leaf.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text(toast)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    authManager.isPro
+                        ? AnyShapeStyle(FormaTheme.Colors.aiGradient)
+                        : AnyShapeStyle(FormaTheme.Colors.brand)
+                )
+                .clipShape(Capsule())
+                .shadow(color: Color.black.opacity(0.18), radius: 10, x: 0, y: 4)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .task(id: authManager.currentUserId) {
             guard authManager.isAuthenticated else { return }
-            if !(primaryProfile?.onboardingCompleted ?? false) && !syncManager.hasCompletedInitialSessionPull {
-                await syncManager.sync(context: modelContext, forcePull: true)
+            AccountRealtimeSocketManager.shared.setAppForeground(true)
+            await syncManager.sync(context: modelContext, forcePull: true)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                guard authManager.isAuthenticated else { return }
+                AccountRealtimeSocketManager.shared.setAppForeground(true)
+                if Date().timeIntervalSince(lastForegroundSyncCheck) > 4.0 {
+                    lastForegroundSyncCheck = Date()
+                    Task {
+                        await syncManager.sync(context: modelContext, forcePull: true)
+                    }
+                }
+            } else if newPhase == .background {
+                AccountRealtimeSocketManager.shared.setAppForeground(false)
             }
         }
         .fullScreenCover(

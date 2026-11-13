@@ -301,14 +301,16 @@ fun DynamicIslandView(
                         // Botão de beber água direto da Ilha
                         Button(
                             onClick = {
-                                val repo = FormaApplication.instance.repository
-                                repo.addWater(250)
-                                islandState.updateNutritionState(
-                                    water = repo.getTodayWater(),
-                                    targetWater = repo.profile.value.targetWaterMilliliters,
-                                    remainingCalories = maxOf(0, (repo.profile.value.targetCalorieIntake - repo.getTodayCaloriesConsumed()).toInt())
-                                )
-                                onQuickAddWater?.invoke()
+                                // Um toque = exatamente uma entrada de 250 ml. Quem hospeda a Ilha pode fornecer
+                                // `onQuickAddWater` (que já chama addWater); só registramos aqui como fallback para
+                                // não duplicar a entrada (bug antigo: +250 virava 500). Os números da Ilha são
+                                // atualizados por `repository.onTodayDataChanged` (HealthGlue).
+                                val quickAdd = onQuickAddWater
+                                if (quickAdd != null) {
+                                    quickAdd()
+                                } else {
+                                    FormaApplication.instance.repository.addWater(250)
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                             shape = RoundedCornerShape(12.dp),

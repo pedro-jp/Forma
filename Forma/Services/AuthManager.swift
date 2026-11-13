@@ -12,6 +12,32 @@ import SwiftData
 import AuthenticationServices
 import UIKit
 
+public enum AccountTier: String, Codable, CaseIterable, Sendable {
+    case free = "FREE"
+    case pro = "PRO"
+
+    public static func from(_ raw: String?) -> AccountTier {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() else {
+            return .free
+        }
+        return trimmed == "PRO" ? .pro : .free
+    }
+
+    public var displayName: String {
+        switch self {
+        case .free: return "Camada Essencial"
+        case .pro: return "Forma Pro"
+        }
+    }
+
+    public var shortBadgeTitle: String {
+        switch self {
+        case .free: return "Essencial"
+        case .pro: return "PRO"
+        }
+    }
+}
+
 @MainActor
 private final class AppleDeletionAuthorizationCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     private var continuation: CheckedContinuation<String?, Error>?
@@ -81,6 +107,7 @@ public final class AuthManager: ObservableObject {
     private let userNameKey = "forma_user_name"
     private let authProviderKey = "forma_auth_provider"
     private let socialProviderIdKey = "forma_social_provider_id"
+    private let accountTierKey = "forma_account_tier"
     private var appleDeletionCoordinator: AppleDeletionAuthorizationCoordinator?
 
     // MARK: - Endereços de Rede Local / Bonjour / Simulador (Lê BACKEND_BASE_URL do Secrets.plist primeiro)
@@ -112,7 +139,7 @@ public final class AuthManager: ObservableObject {
         return productionRenderUrl
     }
     public static let fallbackBonjourUrl = "http://MacBook-Pro-de-Joao-2.local:8085"
-    public static let fallbackCurrentLanUrl = "http://10.0.0.106:8085"
+    public static let fallbackCurrentLanUrl = "http://192.168.1.31:8085"
     public static let fallbackSecondaryLanUrl = "http://192.168.1.23:8085"
     public static let fallbackLocalUrl = "http://localhost:8085"
     public static let fallbackLoopbackUrl = "http://127.0.0.1:8085"
@@ -128,10 +155,18 @@ public final class AuthManager: ObservableObject {
     public func markWorkingServerUrl(_ url: String) {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if serverBaseUrl != trimmed {
+        let changed = (serverBaseUrl != trimmed)
+        if changed {
             serverBaseUrl = trimmed
         }
         UserDefaults.standard.set(trimmed, forKey: Self.lastWorkingServerUrlKey)
+        if changed && isAuthenticated {
+            Task { @MainActor in
+                if !AccountRealtimeSocketManager.shared.isConnected {
+                    AccountRealtimeSocketManager.shared.connectIfNeeded(forceReconnect: true)
+                }
+            }
+        }
     }
 
     public var candidateServerUrls: [String] {
@@ -182,16 +217,74 @@ public final class AuthManager: ObservableObject {
     @Published public var currentUserEmail: String? = nil
     @Published public var currentUserName: String? = nil
     @Published public var currentAuthProvider: String? = nil
+    @Published public var accountTier: AccountTier = .free
+    @Published public var realtimeToastMessage: String? = nil
     @Published public var jwtToken: String? = nil
     @Published public var isAuthenticating: Bool = false
     @Published public var errorMessage: String? = nil
     @Published public var serverBaseUrl: String
+    private var toastDismissTask: Task<Void, Never>? = nil
+
+    public static let accountTierDidChangeNotification = Notification.Name("FormaAccountTierDidChange")
+
+    public var isPro: Bool {
+        accountTier == .pro
+    }
+
+    public func updateAccountTier(_ rawTier: String?, notifyUser: Bool = false) {
+        let resolved = AccountTier.from(rawTier)
+        let didChange = (self.accountTier != resolved)
+        AIDataConsentManager.shared.setConsent(resolved == .pro)
+
+        if didChange {
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                self.accountTier = resolved
+            }
+            if resolved == .pro {
+                GeminiAIService.shared.activateAllForProTier()
+            } else {
+                GeminiAIService.shared.cancelAndCutAllForFreeTier()
+                VoiceRecognitionService.shared.cutAllAIFlowsForFreeTier()
+                AppNavigationRouter.shared.cutAllAIFlowsForFreeTier()
+            }
+            NotificationCenter.default.post(name: Self.accountTierDidChangeNotification, object: resolved)
+
+            if notifyUser && isAuthenticated {
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+                showRealtimeToast(
+                    resolved == .pro
+                        ? "Forma Pro ativado! 100% da IA liberada"
+                        : "Plano Essencial ativo • Funções de IA encerradas"
+                )
+            }
+        }
+        KeychainHelper.shared.save(key: accountTierKey, string: resolved.rawValue)
+        UserDefaults.standard.set(resolved.rawValue, forKey: accountTierKey)
+    }
+
+    public func showRealtimeToast(_ message: String) {
+        toastDismissTask?.cancel()
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+            self.realtimeToastMessage = message
+        }
+        toastDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                self?.realtimeToastMessage = nil
+            }
+        }
+    }
 
     private init() {
         let resolvedUrl = Self.defaultServerUrl
         self.serverBaseUrl = resolvedUrl
 
         let previousOrigin = UserDefaults.standard.string(forKey: Self.boundServerOriginKey)
+        if Self.isConfiguredRemoteHttps {
+            UserDefaults.standard.set(resolvedUrl, forKey: Self.lastWorkingServerUrlKey)
+        }
         if Self.isConfiguredRemoteHttps, previousOrigin != resolvedUrl {
             // Trocou de servidor local para nuvem (Render): invalida apenas o JWT antigo sem apagar os dados locais do iPhone,
             // permitindo que no novo login todos os registros locais sejam enviados ao Render / Supabase.
@@ -212,11 +305,14 @@ public final class AuthManager: ObservableObject {
         let userId = KeychainHelper.shared.loadString(key: userIdKey) ?? UserDefaults.standard.string(forKey: userIdKey)
 
         if let token, !token.isEmpty, let userId, !userId.isEmpty {
+            UserDefaults.standard.set(userId, forKey: userIdKey)
             self.jwtToken = token
             self.currentUserId = userId
             self.currentUserEmail = KeychainHelper.shared.loadString(key: userEmailKey) ?? UserDefaults.standard.string(forKey: userEmailKey)
             self.currentUserName = KeychainHelper.shared.loadString(key: userNameKey) ?? UserDefaults.standard.string(forKey: userNameKey)
             self.currentAuthProvider = KeychainHelper.shared.loadString(key: authProviderKey) ?? UserDefaults.standard.string(forKey: authProviderKey)
+            let storedTier = KeychainHelper.shared.loadString(key: accountTierKey) ?? UserDefaults.standard.string(forKey: accountTierKey)
+            self.accountTier = AccountTier.from(storedTier)
 
             let activeLocalId = UserDefaults.standard.string(forKey: BackendSyncManager.activeLocalUserIdKey)
             if activeLocalId != userId {
@@ -229,12 +325,17 @@ public final class AuthManager: ObservableObject {
 
             self.isAuthenticated = true
             self.isGuest = false
+            Task { @MainActor in
+                AIDataConsentManager.shared.setConsent(self.accountTier == .pro)
+                AccountRealtimeSocketManager.shared.connectIfNeeded()
+            }
         } else {
             self.jwtToken = nil
             self.currentUserId = nil
             self.currentUserEmail = nil
             self.currentUserName = nil
             self.currentAuthProvider = nil
+            self.accountTier = .free
             self.isAuthenticated = false
             self.isGuest = false
         }
@@ -452,6 +553,9 @@ public final class AuthManager: ObservableObject {
 
     // MARK: - Logout Seguro
     public func logout() {
+        AccountRealtimeSocketManager.shared.disconnect()
+        toastDismissTask?.cancel()
+        self.realtimeToastMessage = nil
         self.isAuthenticated = false
         self.isGuest = false
         self.jwtToken = nil
@@ -459,12 +563,14 @@ public final class AuthManager: ObservableObject {
         self.currentUserEmail = nil
         self.currentUserName = nil
         self.currentAuthProvider = nil
+        self.accountTier = .free
 
         KeychainHelper.shared.delete(key: tokenKey)
         KeychainHelper.shared.delete(key: userIdKey)
         KeychainHelper.shared.delete(key: userEmailKey)
         KeychainHelper.shared.delete(key: userNameKey)
         KeychainHelper.shared.delete(key: authProviderKey)
+        KeychainHelper.shared.delete(key: accountTierKey)
         KeychainHelper.shared.delete(key: socialProviderIdKey)
         GoogleAuthService.shared.clearStoredOAuthToken()
 
@@ -473,6 +579,7 @@ public final class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: userEmailKey)
         UserDefaults.standard.removeObject(forKey: userNameKey)
         UserDefaults.standard.removeObject(forKey: authProviderKey)
+        UserDefaults.standard.removeObject(forKey: accountTierKey)
         UserDefaults.standard.removeObject(forKey: "forma_is_guest")
         UserDefaults.standard.removeObject(forKey: BackendSyncManager.activeLocalUserIdKey)
         UserDefaults.standard.removeObject(forKey: "forma_last_sync_timestamp")
@@ -516,6 +623,7 @@ public final class AuthManager: ObservableObject {
             let email: String?
             let name: String?
             let authProvider: String?
+            let accountTier: String?
             let profile: AuthProfileDTO?
         }
 
@@ -530,11 +638,17 @@ public final class AuthManager: ObservableObject {
         UserDefaults.standard.set(result.userId, forKey: BackendSyncManager.activeLocalUserIdKey)
 
         // 2. Grava credenciais em memória e no Keychain antes do pull inicial
+        UserDefaults.standard.set(result.userId, forKey: userIdKey)
+        UserDefaults.standard.set(result.email, forKey: userEmailKey)
+        UserDefaults.standard.set(result.name, forKey: userNameKey)
+        UserDefaults.standard.removeObject(forKey: "forma_is_guest")
+
         self.jwtToken = result.token
         self.currentUserId = result.userId
         self.currentUserEmail = result.email
         self.currentUserName = result.name
         self.currentAuthProvider = result.authProvider ?? defaultProvider
+        UserDefaults.standard.set(self.currentAuthProvider, forKey: authProviderKey)
 
         KeychainHelper.shared.save(key: tokenKey, string: result.token)
         KeychainHelper.shared.save(key: userIdKey, string: result.userId)
@@ -548,12 +662,8 @@ public final class AuthManager: ObservableObject {
             KeychainHelper.shared.save(key: authProviderKey, string: provider)
         }
 
-        UserDefaults.standard.set(result.userId, forKey: userIdKey)
-        UserDefaults.standard.set(result.email, forKey: userEmailKey)
-        UserDefaults.standard.set(result.name, forKey: userNameKey)
-        UserDefaults.standard.set(self.currentAuthProvider, forKey: authProviderKey)
-        UserDefaults.standard.removeObject(forKey: "forma_is_guest")
-        AIDataConsentManager.shared.refreshForCurrentUser()
+        self.updateAccountTier(result.accountTier)
+        AIDataConsentManager.shared.setConsent(self.isPro)
 
         // 3. Aplica dados imediatos do perfil retornados pelo servidor
         let localProfile = FormaDataStore.shared.ensureSingleProfile(in: FormaDataStore.shared.mainContext)
@@ -599,6 +709,215 @@ public final class AuthManager: ObservableObject {
         withAnimation(.easeInOut(duration: 0.25)) {
             self.isGuest = false
             self.isAuthenticated = true
+        }
+        AccountRealtimeSocketManager.shared.connectIfNeeded(forceReconnect: true)
+    }
+}
+
+// MARK: - Sincronização Instantânea da Conta via WebSocket (/ws/account)
+
+@MainActor
+public final class AccountRealtimeSocketManager: ObservableObject {
+    public static let shared = AccountRealtimeSocketManager()
+
+    @Published public private(set) var isConnected: Bool = false
+
+    private var webSocketTask: URLSessionWebSocketTask? = nil
+    private var receiveTask: Task<Void, Never>? = nil
+    private var pingTask: Task<Void, Never>? = nil
+    private var reconnectTask: Task<Void, Never>? = nil
+
+    private var isAppInForeground: Bool = true
+    private var candidateIndex: Int = 0
+    private var reconnectAttempt: Int = 0
+    private var connectedToken: String? = nil
+
+    private let urlSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    private init() {}
+
+    public func setAppForeground(_ active: Bool) {
+        isAppInForeground = active
+        if active {
+            reconnectAttempt = 0
+            connectIfNeeded()
+        } else {
+            disconnect()
+        }
+    }
+
+    public func connectIfNeeded(forceReconnect: Bool = false) {
+        guard isAppInForeground,
+              AuthManager.shared.isAuthenticated,
+              let token = AuthManager.shared.jwtToken,
+              !token.isEmpty else {
+            disconnect()
+            return
+        }
+
+        if !forceReconnect, webSocketTask != nil, connectedToken == token {
+            return
+        }
+
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        cleanupCurrentSocket()
+
+        let candidates = AuthManager.shared.candidateServerUrls
+        guard !candidates.isEmpty else { return }
+
+        let chosenBase = candidates[candidateIndex % candidates.count]
+        guard let request = makeWebSocketRequest(baseHttpUrl: chosenBase, token: token) else {
+            scheduleReconnect()
+            return
+        }
+
+        let task = urlSession.webSocketTask(with: request)
+        self.webSocketTask = task
+        self.connectedToken = token
+        task.resume()
+
+        receiveTask = Task { @MainActor [weak self] in
+            await self?.runReceiveLoop(for: task, baseHttpUrl: chosenBase)
+        }
+
+        pingTask = Task { @MainActor [weak self] in
+            await self?.runPingLoop(for: task)
+        }
+    }
+
+    public func disconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        cleanupCurrentSocket()
+    }
+
+    private func cleanupCurrentSocket() {
+        receiveTask?.cancel()
+        receiveTask = nil
+        pingTask?.cancel()
+        pingTask = nil
+        let existing = webSocketTask
+        webSocketTask = nil
+        connectedToken = nil
+        isConnected = false
+        existing?.cancel(with: .goingAway, reason: nil)
+    }
+
+    private func makeWebSocketRequest(baseHttpUrl: String, token: String) -> URLRequest? {
+        var wsBase = baseHttpUrl
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        if wsBase.lowercased().hasPrefix("https://") {
+            wsBase = "wss://" + wsBase.dropFirst("https://".count)
+        } else if wsBase.lowercased().hasPrefix("http://") {
+            wsBase = "ws://" + wsBase.dropFirst("http://".count)
+        } else {
+            wsBase = "ws://" + wsBase
+        }
+
+        let encodedToken = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? token
+        guard let url = URL(string: "\(wsBase)/ws/account?token=\(encodedToken)") else {
+            return nil
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: 15.0)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    private func runReceiveLoop(for task: URLSessionWebSocketTask, baseHttpUrl: String) async {
+        while !Task.isCancelled && self.webSocketTask === task {
+            do {
+                let message = try await task.receive()
+                guard self.webSocketTask === task else { return }
+
+                if !isConnected {
+                    isConnected = true
+                    reconnectAttempt = 0
+                    candidateIndex = 0
+                    AuthManager.shared.markWorkingServerUrl(baseHttpUrl)
+                }
+
+                switch message {
+                case .string(let text):
+                    handleIncomingText(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        handleIncomingText(text)
+                    }
+                @unknown default:
+                    break
+                }
+            } catch {
+                guard self.webSocketTask === task else { return }
+                cleanupCurrentSocket()
+                scheduleReconnect()
+                return
+            }
+        }
+    }
+
+    private func runPingLoop(for task: URLSessionWebSocketTask) async {
+        while !Task.isCancelled && self.webSocketTask === task {
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled, self.webSocketTask === task else { return }
+            task.sendPing { _ in }
+            try? await task.send(.string("ping"))
+        }
+    }
+
+    private func handleIncomingText(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.lowercased() != "pong" else { return }
+        guard let data = trimmed.data(using: .utf8),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let type = json["type"] as? String else {
+            return
+        }
+
+        if type == "ACCOUNT_DELETED" {
+            AuthManager.shared.logout()
+            return
+        }
+
+        if type == "ACCOUNT_STATE" {
+            if let msgUserId = json["userId"] as? String,
+               let activeId = AuthManager.shared.currentUserId,
+               !msgUserId.isEmpty,
+               msgUserId.lowercased() != activeId.lowercased() {
+                return
+            }
+
+            if let rawTier = json["accountTier"] as? String {
+                AuthManager.shared.updateAccountTier(rawTier, notifyUser: true)
+            }
+
+            if let event = json["event"] as? String, event == "ADMIN_USER_RESET" {
+                Task { @MainActor in
+                    await BackendSyncManager.shared.sync(context: FormaDataStore.shared.mainContext, forcePull: true)
+                }
+            }
+        }
+    }
+
+    private func scheduleReconnect() {
+        guard isAppInForeground, AuthManager.shared.isAuthenticated else { return }
+        reconnectTask?.cancel()
+        candidateIndex += 1
+        let delaySeconds = min(4.0, 0.8 + Double(reconnectAttempt) * 1.0)
+        reconnectAttempt += 1
+
+        reconnectTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.connectIfNeeded(forceReconnect: true)
         }
     }
 }

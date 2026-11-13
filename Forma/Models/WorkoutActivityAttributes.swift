@@ -26,6 +26,13 @@ nonisolated public struct WorkoutActivityAttributes: ActivityAttributes, Sendabl
         public var restDurationSeconds: Int
         public var isAllCompleted: Bool
         
+        // Carga da série atual e da série que acabou de passar
+        public var currentSetWeightKg: Double
+        public var lastCompletedSetNumber: Int
+        public var lastCompletedSetWeightKg: Double
+        public var lastCompletedExerciseName: String
+        public var weightStepKg: Double
+        
         public init(
             workoutTitle: String,
             currentExerciseName: String = "",
@@ -39,7 +46,12 @@ nonisolated public struct WorkoutActivityAttributes: ActivityAttributes, Sendabl
             restStartDate: Date? = nil,
             restEndDate: Date? = nil,
             restDurationSeconds: Int = 90,
-            isAllCompleted: Bool = false
+            isAllCompleted: Bool = false,
+            currentSetWeightKg: Double = 0.0,
+            lastCompletedSetNumber: Int = 0,
+            lastCompletedSetWeightKg: Double = 0.0,
+            lastCompletedExerciseName: String = "",
+            weightStepKg: Double = 2.0
         ) {
             self.workoutTitle = workoutTitle
             self.currentExerciseName = currentExerciseName
@@ -54,6 +66,11 @@ nonisolated public struct WorkoutActivityAttributes: ActivityAttributes, Sendabl
             self.restEndDate = restEndDate
             self.restDurationSeconds = restDurationSeconds
             self.isAllCompleted = isAllCompleted
+            self.currentSetWeightKg = currentSetWeightKg
+            self.lastCompletedSetNumber = lastCompletedSetNumber
+            self.lastCompletedSetWeightKg = lastCompletedSetWeightKg
+            self.lastCompletedExerciseName = lastCompletedExerciseName
+            self.weightStepKg = weightStepKg > 0 ? weightStepKg : 2.0
         }
         
         public var overallProgress: Double {

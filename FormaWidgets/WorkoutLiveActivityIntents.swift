@@ -49,6 +49,104 @@ public struct AddRestTimeLiveIntent: LiveActivityIntent {
     }
 }
 
+/// Intent para aumentar a carga (+2 kg) da série que passou / atual diretamente pela Ilha Dinâmica ou Tela Bloqueada
+public struct IncreaseSetWeightLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Aumentar Carga (+2kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 2.0)
+        return .result()
+    }
+}
+
+/// Intent para reduzir a carga (-2 kg) da série que passou / atual diretamente pela Ilha Dinâmica ou Tela Bloqueada
+public struct DecreaseSetWeightLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Reduzir Carga (-2kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -2.0)
+        return .result()
+    }
+}
+
+/// Intent para aumentar +0.5 kg na carga da série pela Ilha Dinâmica ou Tela Bloqueada
+public struct IncreaseHalfKgLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Aumentar Carga (+0.5kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 0.5)
+        return .result()
+    }
+}
+
+/// Intent para reduzir -0.5 kg na carga da série pela Ilha Dinâmica ou Tela Bloqueada
+public struct DecreaseHalfKgLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Reduzir Carga (-0.5kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -0.5)
+        return .result()
+    }
+}
+
+/// Intent para aumentar +1 kg na carga da série pela Ilha Dinâmica ou Tela Bloqueada
+public struct IncreaseOneKgLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Aumentar Carga (+1kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: 1.0)
+        return .result()
+    }
+}
+
+/// Intent para reduzir -1 kg na carga da série pela Ilha Dinâmica ou Tela Bloqueada
+public struct DecreaseOneKgLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Reduzir Carga (-1kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.adjustRecentSetWeightFromLiveActivity(deltaKg: -1.0)
+        return .result()
+    }
+}
+
+/// Intent para alternar o passo de ajuste de carga na Ilha Dinâmica (2kg -> 1kg -> 0.5kg)
+public struct CycleWeightStepLiveIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Alternar Passo de Carga (2kg / 1kg / 0.5kg)"
+    public static var isDiscoverable: Bool = false
+    public static var openAppWhenRun: Bool = false
+    
+    public init() {}
+    
+    public func perform() async throws -> some IntentResult {
+        await SharedWorkoutSessionManager.shared.cycleWeightStepFromLiveActivity()
+        return .result()
+    }
+}
+
 /// Intent para finalizar e registrar o treino completo pela Ilha Dinâmica
 public struct FinishWorkoutLiveIntent: LiveActivityIntent {
     public static var title: LocalizedStringResource = "Finalizar Treino"

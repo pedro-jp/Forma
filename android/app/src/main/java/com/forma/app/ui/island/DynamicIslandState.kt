@@ -41,13 +41,13 @@ class DynamicIslandState private constructor(context: Context) {
     val workoutCalories: StateFlow<Double> = _workoutCalories.asStateFlow()
 
     // Water & Calorie Status
-    private val _waterCurrent = MutableStateFlow(750)
+    private val _waterCurrent = MutableStateFlow(0)
     val waterCurrent: StateFlow<Int> = _waterCurrent.asStateFlow()
 
     private val _waterTarget = MutableStateFlow(2500)
     val waterTarget: StateFlow<Int> = _waterTarget.asStateFlow()
 
-    private val _caloriesRemaining = MutableStateFlow(1250)
+    private val _caloriesRemaining = MutableStateFlow(0)
     val caloriesRemaining: StateFlow<Int> = _caloriesRemaining.asStateFlow()
 
     private fun loadPreset(): IslandPreset {

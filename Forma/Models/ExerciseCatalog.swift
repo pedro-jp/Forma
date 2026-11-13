@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// Item individual do catálogo de exercícios com anatomia, GIF animado e guia biomecânico
+/// Item individual do catálogo de exercícios com anatomia, vídeo 3D de 10s e guia biomecânico
 public struct ExerciseCatalogItem: Identifiable, Sendable, Equatable {
     public let id: String
     public let name: String
@@ -21,6 +21,19 @@ public struct ExerciseCatalogItem: Identifiable, Sendable, Equatable {
     public let breathingInstruction: String
     public let commonMistake: String
     public let synonyms: [String]
+
+    /// Nome canônico do arquivo de vídeo MP4 de 10s em `ExerciseVideos/<videoName>.mp4`
+    public var videoName: String { gifName }
+
+    /// ID do exercício principal ao qual este movimento pertence (igual ao próprio `id` se for principal)
+    public var mainExerciseId: String {
+        ExerciseCatalog.variationParentMap[id] ?? id
+    }
+
+    /// Indica se este movimento é uma variação de um dos 27 exercícios principais
+    public var isVariation: Bool {
+        mainExerciseId != id
+    }
     
     public init(
         id: String,
@@ -1141,101 +1154,458 @@ public final class ExerciseCatalog: @unchecked Sendable {
                 commonMistake: "Subir com a coluna reta forçando os flexores do quadril em vez de enrolar o abdômen.",
                 synonyms: ["abdominal declinado", "decline crunch", "sit up declinado"]
             ),
+            // MARK: - Variações Adicionais do Catálogo de Vídeos 3D (Total: 82 movimentos)
+            ExerciseCatalogItem(
+                id: "puxada_triangulo",
+                name: "Puxada Alta com Triângulo",
+                muscleGroup: "Costas",
+                emphasisMuscle: "Grande Dorsal Inferior (Pegada Neutra)",
+                targetMuscles: "Grande Dorsal, Redondo Maior, Bíceps, Braquial",
+                gifName: "puxada_triangulo",
+                setupInstruction: "Conecte o puxador triângulo na polia alta, ajuste os rolos sobre as coxas e segure com pegada neutra.",
+                eccentricInstruction: "Retorne controladamente estendendo os cotovelos acima da cabeça, permitindo o alongamento profundo das dorsais.",
+                concentricInstruction: "Deprima as escápulas e puxe o triângulo em direção à parte superior do esterno, mantendo os cotovelos próximos ao tronco.",
+                breathingInstruction: "Expire ao puxar o triângulo até o peito e inspire alongando na subida.",
+                commonMistake: "Balançar excessivamente a lombar para trás transformando a puxada em remada.",
+                synonyms: ["puxada triangulo", "puxada neutra", "pulley triangulo", "puxada fechada", "close grip pulldown"]
+            ),
+            ExerciseCatalogItem(
+                id: "agachamento_frontal",
+                name: "Agachamento Frontal com Barra",
+                muscleGroup: "Pernas",
+                emphasisMuscle: "Quadríceps (Ênfase Anterior e Core)",
+                targetMuscles: "Quadríceps, Glúteo Máximo, Eretores Torácicos, Core",
+                gifName: "agachamento_frontal",
+                setupInstruction: "Apoie a barra sobre os deltoides anteriores (pegada clean ou braços cruzados) mantendo os cotovelos apontados bem à frente.",
+                eccentricInstruction: "Inspire no bracing e desça com o tronco bem vertical, projetando os joelhos na direção da ponta dos pés.",
+                concentricInstruction: "Empurre o solo com firmeza mantendo o peito alto e os cotovelos elevados até estender quadris e joelhos.",
+                breathingInstruction: "Inspire antes de iniciar a descida e expire ao superar o ponto crítico da subida.",
+                commonMistake: "Deixar os cotovelos caírem na subida, arredondando a coluna torácica.",
+                synonyms: ["agachamento frontal", "front squat", "agachamento pela frente"]
+            ),
+            ExerciseCatalogItem(
+                id: "agachamento_sumo",
+                name: "Agachamento Sumô",
+                muscleGroup: "Pernas",
+                emphasisMuscle: "Adutores da Coxa e Glúteo Máximo",
+                targetMuscles: "Adutores, Glúteo Máximo, Quadríceps",
+                gifName: "agachamento_sumo",
+                setupInstruction: "Afaste os pés além da largura dos ombros com as pontas voltadas cerca de 35° a 45° para fora.",
+                eccentricInstruction: "Desça controlando o quadril verticalmente enquanto empurra ativamente os joelhos para fora, alinhados aos pés.",
+                concentricInstruction: "Contraia glúteos e parte interna das coxas empurrando pelos calcanhares até retornar à extensão.",
+                breathingInstruction: "Inspire descendo e expire contraindo glúteos e adutores no topo.",
+                commonMistake: "Permitir valgo dinâmico (joelhos caindo para dentro em relação à ponta dos pés).",
+                synonyms: ["agachamento sumo", "sumo squat", "sumo com haltere", "sumo barra"]
+            ),
+            ExerciseCatalogItem(
+                id: "panturrilha_sentado",
+                name: "Panturrilha Sentado (Sóleo)",
+                muscleGroup: "Pernas",
+                emphasisMuscle: "Músculo Sóleo (Joelho Flexionado 90°)",
+                targetMuscles: "Sóleo, Gastrocnêmio",
+                gifName: "panturrilha_sentado",
+                setupInstruction: "Sente-se no aparelho de panturrilha com o apoio firme logo acima dos joelhos e a ponta dos pés na plataforma.",
+                eccentricInstruction: "Desça os calcanhares de forma lenta abaixo da linha da plataforma por 2 segundos, alongando o tendão calcâneo.",
+                concentricInstruction: "Eleve os calcanhares até a contração máxima na ponta dos pés e sustente 1 segundo no pico.",
+                breathingInstruction: "Inspire alongando embaixo e expire no pico da flexão plantar.",
+                commonMistake: "Executar movimentos curtos e rápidos usando rebote elástico.",
+                synonyms: ["panturrilha sentado", "gemeos sentado", "soleo", "seated calf raise", "burrinho sentado"]
+            ),
+            ExerciseCatalogItem(
+                id: "crucifixo_inverso_maquina",
+                name: "Crucifixo Inverso na Máquina (Peck Deck)",
+                muscleGroup: "Ombros",
+                emphasisMuscle: "Deltoide Posterior Isolado",
+                targetMuscles: "Deltoide Posterior, Infraespinhal, Trapézio Médio",
+                gifName: "crucifixo_inverso_maquina",
+                setupInstruction: "Ajuste o assento de frente para o encosto do Peck Deck para que as pegadas fiquem na linha horizontal dos ombros.",
+                eccentricInstruction: "Retorne os braços à frente controladamente sem deixar as placas de peso baterem.",
+                concentricInstruction: "Abra os braços em arco horizontal conduzindo pelos cotovelos até alinhar com o tronco, focando no posterior de ombro.",
+                breathingInstruction: "Expire ao abrir os braços e inspire ao retornar à frente.",
+                commonMistake: "Encolher o trapézio superior ou retrair demais as escápulas roubando tensão do deltoide posterior.",
+                synonyms: ["crucifixo inverso maquina", "peck deck invertido", "voador invertido", "voador costas", "reverse pec deck"]
+            ),
         ]
     }
-    
-    /// Retorna os exercícios de um determinado grupo muscular
-    public func items(for group: String) -> [ExerciseCatalogItem] {
-        return items.filter { $0.muscleGroup.lowercased() == group.lowercased() }
+
+    // MARK: - Hierarquia de Exercícios Principais (27) e Variações (55)
+
+    /// Mapa canônico associando cada uma das 55 variações ao seu exercício principal
+    public static let variationParentMap: [String: String] = [
+        // Peitoral
+        "supino_inclinado": "supino_reto",
+        "supino_declinado": "supino_reto",
+        "supino_reto_halteres": "supino_reto",
+        "supino_inclinado_halteres": "supino_reto",
+        "crucifixo_inclinado": "crucifixo",
+        "crossover_polia": "crucifixo",
+        "voador_peck_deck": "crucifixo",
+        "paralelas_peito": "flexao_de_braco",
+        // Costas
+        "puxada_triangulo": "puxada_alta",
+        "puxada_articulada": "puxada_alta",
+        "pulldown_corda": "puxada_alta",
+        "pull_over": "puxada_alta",
+        "chin_up": "barra_fixa",
+        "remada_baixa": "remada_curvada",
+        "remada_unilateral": "remada_curvada",
+        "remada_cavalinho": "remada_curvada",
+        // Pernas
+        "agachamento_frontal": "agachamento_livre",
+        "agachamento_sumo": "agachamento_livre",
+        "agachamento_hack": "agachamento_livre",
+        "leg_press": "agachamento_livre",
+        "agachamento_bulgaro": "afundo",
+        "mesa_flexora": "cadeira_extensora",
+        "cadeira_flexora": "cadeira_extensora",
+        "panturrilha_sentado": "panturrilha",
+        // Ombros
+        "desenvolvimento_barra": "desenvolvimento",
+        "desenvolvimento_arnold": "desenvolvimento",
+        "elevacao_lateral_polia": "elevacao_lateral",
+        "elevacao_lateral_inclinado": "elevacao_lateral",
+        "elevacao_frontal": "elevacao_lateral",
+        "crucifixo_inverso_maquina": "crucifixo_invertido",
+        "face_pull": "crucifixo_invertido",
+        "remada_alta": "encolhimento",
+        // Bíceps
+        "rosca_alternada": "rosca_direta",
+        "rosca_inversa": "rosca_direta",
+        "rosca_21": "rosca_direta",
+        "rosca_martelo_corda": "rosca_martelo",
+        "rosca_concentrada": "rosca_scott",
+        "rosca_inclinada": "rosca_scott",
+        "rosca_spider": "rosca_scott",
+        "rosca_bayesian": "rosca_scott",
+        // Tríceps
+        "triceps_barra_reta": "triceps_corda",
+        "triceps_barra_v": "triceps_corda",
+        "supino_fechado": "triceps_testa",
+        "triceps_frances_polia": "triceps_frances",
+        "triceps_coice": "triceps_frances",
+        "triceps_kickback_cabo": "triceps_frances",
+        "mergulho_banco": "triceps_paralelas",
+        // Abdômen
+        "abdominal_polia": "abdominal_crunch",
+        "abdominal_remador": "abdominal_crunch",
+        "abdominal_bicicleta": "abdominal_crunch",
+        "abdominal_declinado": "abdominal_crunch",
+        "elevacao_pernas_barra": "abdominal_infra",
+        "roda_abdominal": "abdominal_infra",
+        "prancha_lateral": "prancha",
+        "vacuum_abdominal": "prancha"
+    ]
+
+    /// Todos os 27 exercícios principais
+    public var mainExercises: [ExerciseCatalogItem] {
+        items.filter { !$0.isVariation }
     }
-    
-    /// Encontra o exercício mais compatível a partir do texto do treino ou comando de voz da IA
-    public func matchExercise(query: String) -> ExerciseCatalogItem? {
-        let clean = query
-            .folding(options: .diacriticInsensitive, locale: .current)
+
+    /// Retorna o exercício principal correspondente a qualquer ID (principal ou variação)
+    public func mainExercise(for itemId: String) -> ExerciseCatalogItem? {
+        let rootId = Self.variationParentMap[itemId] ?? itemId
+        return item(withId: rootId)
+    }
+
+    /// Retorna todas as variações associadas ao exercício principal do ID informado
+    public func variations(for itemId: String) -> [ExerciseCatalogItem] {
+        let rootId = Self.variationParentMap[itemId] ?? itemId
+        return items.filter { $0.isVariation && $0.mainExerciseId == rootId }
+    }
+
+    /// Retorna a família completa (exercício principal + todas as suas variações), útil para explorar alternativas
+    public func familyExercises(for itemId: String) -> [ExerciseCatalogItem] {
+        let rootId = Self.variationParentMap[itemId] ?? itemId
+        var result: [ExerciseCatalogItem] = []
+        if let main = item(withId: rootId) {
+            result.append(main)
+        }
+        result.append(contentsOf: items.filter { $0.isVariation && $0.mainExerciseId == rootId })
+        return result
+    }
+
+    /// Retorna os exercícios de um determinado grupo muscular (principais ordenados junto às suas variações)
+    public func items(for group: String) -> [ExerciseCatalogItem] {
+        let groupItems = items.filter { $0.muscleGroup.lowercased() == group.lowercased() }
+        let mains = groupItems.filter { !$0.isVariation }
+        var organized: [ExerciseCatalogItem] = []
+        for main in mains {
+            organized.append(main)
+            organized.append(contentsOf: groupItems.filter { $0.isVariation && $0.mainExerciseId == main.id })
+        }
+        // Segurança caso algum item do grupo tenha parent em outro grupo
+        for extra in groupItems where !organized.contains(extra) {
+            organized.append(extra)
+        }
+        return organized
+    }
+
+    // MARK: - Normalização e Associação Inteligente com IA (100% Cobertura de Vídeo)
+
+    private static let stopwords: Set<String> = [
+        "com", "sem", "para", "por", "nos", "nas", "dos", "das", "uma", "uns", "umas", "ate", "foco", "livre"
+    ]
+
+    private static let modifierGroups: [[String]] = [
+        ["inclinado", "inclinada", "incline"],
+        ["declinado", "declinada", "canadense", "decline"],
+        ["halter", "halteres", "dumbbell", "db"],
+        ["barra", "barbell"],
+        ["polia", "pulley", "cabo", "cable", "crossover"],
+        ["corda", "rope"],
+        ["triangulo", "neutra", "fechada"],
+        ["articulada", "articulado", "maquina", "machine"],
+        ["peck", "voador"],
+        ["unilateral", "serrote"],
+        ["cavalinho"],
+        ["frontal", "front"],
+        ["sumo"],
+        ["hack"],
+        ["bulgaro", "bulgarian"],
+        ["afundo", "passada", "avanco", "lunge"],
+        ["sentado", "sentada", "cadeira", "seated"],
+        ["deitado", "deitada", "mesa", "lying"],
+        ["arnold"],
+        ["militar", "military"],
+        ["inverso", "inversa", "invertido", "invertida", "reverse"],
+        ["scott", "preacher"],
+        ["concentrada", "concentrado"],
+        ["spider"],
+        ["bayesian"],
+        ["martelo", "hammer"],
+        ["alternada", "alternado"],
+        ["21", "vinte"],
+        ["testa", "skull"],
+        ["frances", "overhead"],
+        ["coice", "kickback"],
+        ["fechado", "close"],
+        ["mergulho"],
+        ["paralela", "paralelas", "dips"],
+        ["remador"],
+        ["bicicleta", "cruzado", "obliquo"],
+        ["roda", "wheel", "abwheel"],
+        ["infra"],
+        ["suspenso", "hanging"],
+        ["lateral"],
+        ["vacuum", "vacuo", "hipopressivo"],
+        ["prancha", "plank"],
+        ["chin", "supinada"],
+        ["stiff", "romeno", "rdl"],
+        ["pelvica", "thrust", "gluteo"],
+        ["extensora"],
+        ["flexora"],
+        ["panturrilha", "gemeos", "soleo", "calf"]
+    ]
+
+    private func normalize(_ raw: String) -> String {
+        let folded = raw
+            .folding(options: .diacriticInsensitive, locale: Locale(identifier: "pt_BR"))
             .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 1. Busca por ID exato
-        if let match = items.first(where: { $0.id == clean }) {
-            return match
-        }
-        
-        // 2. Busca por sinônimos cadastrados
-        for item in items {
-            for syn in item.synonyms {
-                let synClean = syn.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-                if clean.contains(synClean) || synClean.contains(clean) {
-                    return item
-                }
-            }
-        }
-        
-        // 3. Busca por similaridade no nome do exercício
-        let cleanWords = clean.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 }
-        for item in items {
-            let itemNameClean = item.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            for word in cleanWords {
-                if itemNameClean.contains(word) {
-                    return item
-                }
-            }
-        }
-        
-        // 4. Busca por grupo muscular se nenhuma palavra coincidir
-        for group in muscleGroups {
-            let groupClean = group.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            if clean.contains(groupClean) {
-                return items.first(where: { $0.muscleGroup.lowercased() == group.lowercased() })
-            }
-        }
-        
+        let cleaned = folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(cleaned)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    private func inferCanonicalGroup(from hint: String) -> String? {
+        let h = normalize(hint)
+        guard !h.isEmpty else { return nil }
+        if h.contains("peito") || h.contains("peitoral") || h.contains("chest") { return "Peitoral" }
+        if h.contains("costa") || h.contains("dorsal") || h.contains("romboide") || h.contains("lombar") || h.contains("back") { return "Costas" }
+        if h.contains("perna") || h.contains("quadriceps") || h.contains("gluteo") || h.contains("isquio") || h.contains("posterior") || h.contains("coxa") || h.contains("adutor") || h.contains("panturrilha") || h.contains("soleo") || h.contains("gemeo") || h.contains("leg") { return "Pernas" }
+        if h.contains("ombro") || h.contains("deltoide") || h.contains("trapezio") || h.contains("shoulder") { return "Ombros" }
+        if h.contains("biceps") || h.contains("braquial") || h.contains("antebraco") { return "Bíceps" }
+        if h.contains("triceps") { return "Tríceps" }
+        if h.contains("abdom") || h.contains("core") || h.contains("obliquo") || h.contains("lombar") { return "Abdômen" }
         return nil
     }
-    
+
+    /// Encontra o exercício mais compatível a partir do texto do treino ou comando de voz da IA usando pontuação de especificidade
+    public func matchExercise(query: String, targetMuscle: String = "") -> ExerciseCatalogItem? {
+        let rawTrimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTrimmed.isEmpty else { return nil }
+
+        let idCandidate = rawTrimmed
+            .folding(options: .diacriticInsensitive, locale: Locale(identifier: "pt_BR"))
+            .lowercased()
+            .replacingOccurrences(of: ".mp4", with: "")
+            .replacingOccurrences(of: ".gif", with: "")
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+
+        // 1. Busca por ID canônico exato
+        if let exact = items.first(where: { $0.id == idCandidate }) {
+            return exact
+        }
+
+        let qNorm = normalize(rawTrimmed)
+        guard !qNorm.isEmpty else { return nil }
+
+        // 2. Igualdade exata com nome ou sinônimo completo
+        for item in items {
+            if normalize(item.name) == qNorm { return item }
+            for syn in item.synonyms where normalize(syn) == qNorm {
+                return item
+            }
+        }
+
+        let qWords = qNorm.split(separator: " ").map(String.init)
+        let qTokens = qWords.filter { ($0.count >= 3 || $0 == "21" || $0 == "db") && !Self.stopwords.contains($0) }
+        let hintedGroup = inferCanonicalGroup(from: targetMuscle) ?? inferCanonicalGroup(from: rawTrimmed)
+
+        var bestItem: ExerciseCatalogItem? = nil
+        var bestScore: Int = 0
+
+        for item in items {
+            var score = 0
+            let nameNorm = normalize(item.name)
+            let idNorm = item.id.replacingOccurrences(of: "_", with: " ")
+            let synsNorm = item.synonyms.map { normalize($0) }
+            let fullBlob = ([nameNorm, idNorm] + synsNorm).joined(separator: " ")
+            let itemWordSet = Set(fullBlob.split(separator: " ").map(String.init))
+
+            // Pontuação pelo sinônimo mais longo e específico contido na query
+            var bestSynBonus = 0
+            for syn in synsNorm where !syn.isEmpty {
+                let paddedQ = " \(qNorm) "
+                let paddedSyn = " \(syn) "
+                if paddedQ.contains(paddedSyn) {
+                    bestSynBonus = max(bestSynBonus, 36 + syn.count * 3)
+                } else if paddedSyn.contains(paddedQ) && qNorm.count >= 5 {
+                    bestSynBonus = max(bestSynBonus, 24 + qNorm.count * 2)
+                }
+            }
+            score += bestSynBonus
+
+            // Sobreposição de tokens relevantes
+            for tok in qTokens {
+                if itemWordSet.contains(tok) {
+                    score += 20 + tok.count * 2
+                } else if fullBlob.contains(tok) && tok.count >= 4 {
+                    score += 12 + tok.count
+                }
+            }
+
+            // Modificadores de variação biomecânica (inclinado, halteres, polia, sumo, bayesian, etc.)
+            var queryHasSpecificModifier = false
+            for modGroup in Self.modifierGroups {
+                let qHas = modGroup.contains { qTokens.contains($0) || " \(qNorm) ".contains(" \($0) ") }
+                if qHas {
+                    queryHasSpecificModifier = true
+                    let itemHas = modGroup.contains { itemWordSet.contains($0) || " \(fullBlob) ".contains(" \($0) ") }
+                    if itemHas {
+                        score += 38
+                    } else {
+                        score -= 10
+                    }
+                }
+            }
+
+            // Se a busca não pediu variação específica, prioriza o Exercício Principal daquela família
+            if !queryHasSpecificModifier && !item.isVariation && score > 0 {
+                score += 10
+            }
+
+            // Alinhamento com o grupo muscular alvo informado pela IA
+            if let g = hintedGroup, item.muscleGroup == g {
+                score += (score > 0) ? 24 : 8
+            }
+
+            if score > bestScore {
+                bestScore = score
+                bestItem = item
+            }
+        }
+
+        if bestScore >= 20, let winner = bestItem {
+            return winner
+        }
+
+        // Fallback por grupo muscular se o nome for muito genérico (ex: "Treino de Peito", "Exercício Dorsal")
+        if let g = hintedGroup {
+            return defaultMainExercise(forMuscleGroup: g)
+        }
+
+        return nil
+    }
+
+    /// Retorna o exercício principal padrão de um grupo muscular para garantia de vídeo 100%
+    public func defaultMainExercise(forMuscleGroup group: String) -> ExerciseCatalogItem {
+        let canonicalDefaults: [String: String] = [
+            "Peitoral": "supino_reto",
+            "Costas": "puxada_alta",
+            "Pernas": "agachamento_livre",
+            "Ombros": "desenvolvimento",
+            "Bíceps": "rosca_direta",
+            "Tríceps": "triceps_corda",
+            "Abdômen": "abdominal_crunch"
+        ]
+        if let id = canonicalDefaults[group], let found = item(withId: id) {
+            return found
+        }
+        return items.first { $0.muscleGroup.lowercased() == group.lowercased() } ?? items[0]
+    }
+
+    /// Garante SEMPRE um exercício válido com vídeo 3D de 10s (usado na criação de exercícios/treinos com IA)
+    public func guaranteedMatch(for name: String, targetMuscle: String = "") -> ExerciseCatalogItem {
+        if let matched = matchExercise(query: name, targetMuscle: targetMuscle) {
+            return matched
+        }
+        if let group = inferCanonicalGroup(from: "\(name) \(targetMuscle)") {
+            return defaultMainExercise(forMuscleGroup: group)
+        }
+        return item(withId: "agachamento_livre") ?? items[0]
+    }
+
     /// Busca o melhor exercício compatível a partir do nome (alias de matchExercise)
     public func findBestMatch(for name: String) -> ExerciseCatalogItem? {
         return matchExercise(query: name)
     }
-    
-    /// Associa automaticamente os GIFs biomecânicos e IDs aos exercícios com base em IA/nome
+
+    /// Associa SEMPRE um vídeo de execução válido aos exercícios criados manualmente ou via IA
     public func autoAssociateExercises(in exercises: [WorkoutExerciseItem]) -> [WorkoutExerciseItem] {
         var updated = exercises
         for i in 0..<updated.count {
-            if updated[i].animationId == nil || updated[i].animationId?.isEmpty == true {
-                if let match = matchExercise(query: updated[i].name) {
-                    updated[i].animationId = match.id
-                    if updated[i].executionTip.isEmpty {
-                        updated[i].executionTip = match.concentricInstruction
-                    }
+            // Valida se o animationId já existe de fato no catálogo de 82 vídeos
+            if let existingId = updated[i].animationId,
+               !existingId.isEmpty,
+               let validItem = item(withId: existingId) {
+                if updated[i].executionTip.isEmpty {
+                    updated[i].executionTip = validItem.concentricInstruction
                 }
+                continue
+            }
+
+            // Caso animationId esteja nil, vazio ou inválido (alucinado pela IA), resolve garantidamente para o melhor vídeo 3D!
+            let candidateQuery = updated[i].animationId?.isEmpty == false
+                ? "\(updated[i].name) \(updated[i].animationId!)"
+                : updated[i].name
+            let match = guaranteedMatch(for: candidateQuery, targetMuscle: updated[i].targetMuscle)
+            updated[i].animationId = match.id
+            if updated[i].executionTip.isEmpty {
+                updated[i].executionTip = match.concentricInstruction
             }
         }
         return updated
     }
-    
-    /// Retorna os exercícios com os IDs de animação correspondentes preenchidos automaticamente
+
+    /// Retorna os exercícios com os IDs de vídeo correspondentes preenchidos automaticamente
     public func enrichExercises(_ exercises: [WorkoutExerciseItem]) -> [WorkoutExerciseItem] {
         return autoAssociateExercises(in: exercises)
     }
-    
-    /// Retorna a rotina com os IDs de exercícios correspondentes preenchidos automaticamente pela IA
+
+    /// Retorna a rotina com todos os vídeos de execução associados garantidamente
     func enrichRoutineWithCatalog(_ routine: WorkoutRoutine) -> WorkoutRoutine {
-        var items = routine.exercises
-        for i in 0..<items.count {
-            if items[i].animationId == nil || items[i].animationId?.isEmpty == true {
-                if let match = matchExercise(query: items[i].name) {
-                    items[i].animationId = match.id
-                }
-            }
-        }
-        routine.exercises = items
+        routine.exercises = autoAssociateExercises(in: routine.exercises)
         return routine
     }
-    
+
     /// Retorna um item pelo seu ID
     public func item(withId id: String?) -> ExerciseCatalogItem? {
-        guard let id = id else { return nil }
-        return items.first { $0.id == id }
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        let clean = id
+            .replacingOccurrences(of: ".mp4", with: "")
+            .replacingOccurrences(of: ".gif", with: "")
+        return items.first { $0.id == clean }
     }
 }

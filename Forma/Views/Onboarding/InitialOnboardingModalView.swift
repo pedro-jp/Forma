@@ -178,6 +178,11 @@ struct InitialOnboardingModalView: View {
             .onAppear {
                 prefillInitialNameIfAvailable()
             }
+            .onChange(of: authManager.accountTier) { _, _ in
+                aiDebounceTask?.cancel()
+                lastAISignature = ""
+                scheduleAutoAISuggestion(immediate: true)
+            }
             .onChange(of: currentWeightText) { _, _ in scheduleAutoAISuggestion() }
             .onChange(of: heightText) { _, _ in scheduleAutoAISuggestion() }
             .onChange(of: selectedGoal) { _, _ in
@@ -203,11 +208,11 @@ struct InitialOnboardingModalView: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(FormaTheme.Colors.aiGradient)
+                        .fill(authManager.isPro ? AnyShapeStyle(FormaTheme.Colors.aiGradient) : AnyShapeStyle(FormaTheme.Colors.brandSoft))
                         .frame(width: 46, height: 46)
-                    Image(systemName: "sparkles")
+                    Image(systemName: authManager.isPro ? "sparkles" : "heart.text.square.fill")
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(authManager.isPro ? .white : FormaTheme.Colors.brand)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -220,10 +225,14 @@ struct InitialOnboardingModalView: View {
                 }
             }
 
-            Text("Assim que você informar seu peso e altura, nossa IA calculará automaticamente suas metas ideais de calorias, proteínas, carboidratos, gorduras e hidratação.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                authManager.isPro
+                    ? "Assim que você informar seu peso e altura, nossa IA calculará automaticamente suas metas ideais de calorias, proteínas, carboidratos, gorduras e hidratação."
+                    : "Assim que você informar seu peso e altura, calcularemos automaticamente suas metas ideais de calorias, macronutrientes e hidratação pelas equações fisiológicas Mifflin-St Jeor e ISSN."
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,7 +240,7 @@ struct InitialOnboardingModalView: View {
         .clipShape(RoundedRectangle(cornerRadius: FormaTheme.Radius.card, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: FormaTheme.Radius.card, style: .continuous)
-                .stroke(FormaTheme.Colors.aiAccent.opacity(0.25), lineWidth: 1)
+                .stroke((authManager.isPro ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand).opacity(0.22), lineWidth: 1)
         )
     }
 
@@ -357,7 +366,7 @@ struct InitialOnboardingModalView: View {
 
             onboardingNumberField(
                 title: "Meta de Peso (kg)",
-                placeholder: "Sugerida pela IA ou digite (ex: 78,0)",
+                placeholder: authManager.isPro ? "Sugerida pela IA ou digite (ex: 78,0)" : "Sugerida automaticamente ou digite (ex: 78,0)",
                 text: Binding(
                     get: { targetWeightText },
                     set: { newVal in
@@ -390,10 +399,10 @@ struct InitialOnboardingModalView: View {
     private var aiGoalsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                sectionTitle("3. Metas Diárias", icon: "sparkles")
+                sectionTitle("3. Metas Diárias", icon: authManager.isPro ? "sparkles" : "bolt.heart.fill")
                 Spacer()
                 Button {
-                    if aiConsent.hasGrantedConsent {
+                    if !authManager.isPro || aiConsent.hasGrantedConsent {
                         triggerAISuggestionNow(forceTargetWeightRefresh: !hasManuallyEditedTargetWeight)
                     } else {
                         showAIConsentSheet = true
@@ -405,10 +414,10 @@ struct InitialOnboardingModalView: View {
                                 .controlSize(.mini)
                                 .tint(.white)
                         } else {
-                            Image(systemName: "sparkles")
+                            Image(systemName: authManager.isPro ? "sparkles" : "function")
                                 .font(.system(size: 11, weight: .bold))
                         }
-                        Text(isLoadingAISuggestion ? "Calculando..." : "IA Google Gemini")
+                        Text(isLoadingAISuggestion ? "Calculando..." : (authManager.isPro ? "IA Google Gemini" : "Recalcular TMB"))
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                     }
                     .foregroundStyle(.white)
@@ -416,7 +425,7 @@ struct InitialOnboardingModalView: View {
                     .padding(.vertical, 7)
                     .background(
                         (validCurrentWeight != nil && validHeight != nil)
-                        ? AnyShapeStyle(FormaTheme.Colors.aiGradient)
+                        ? (authManager.isPro ? AnyShapeStyle(FormaTheme.Colors.aiGradient) : AnyShapeStyle(FormaTheme.Colors.brand))
                         : AnyShapeStyle(Color.gray.opacity(0.4))
                     )
                     .clipShape(Capsule())
@@ -426,21 +435,25 @@ struct InitialOnboardingModalView: View {
             }
 
             HStack(spacing: 6) {
-                Image(systemName: aiConsent.hasGrantedConsent ? "sparkles" : "function")
+                Image(systemName: (authManager.isPro && aiConsent.hasGrantedConsent) ? "sparkles" : "function")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(aiConsent.hasGrantedConsent ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand)
-                Text(aiConsent.hasGrantedConsent
-                     ? "Sugestões ativas via IA do Google Gemini (Google LLC)"
-                     : "Cálculo local (Mifflin-St Jeor) • Toque em \"IA Google Gemini\" para ativar a IA na nuvem")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle((authManager.isPro && aiConsent.hasGrantedConsent) ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand)
+                Text(
+                    !authManager.isPro
+                        ? "Cálculo fisiológico automático (Mifflin-St Jeor & ISSN)"
+                        : (aiConsent.hasGrantedConsent
+                            ? "Sugestões ativas via IA do Google Gemini (Google LLC)"
+                            : "Cálculo local (Mifflin-St Jeor) • Toque em \"IA Google Gemini\" para ativar a IA na nuvem")
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
 
             if isLoadingAISuggestion {
                 HStack(spacing: 10) {
                     ProgressView()
-                        .tint(FormaTheme.Colors.aiAccent)
-                    Text(aiConsent.hasGrantedConsent
+                        .tint(authManager.isPro ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand)
+                    Text((authManager.isPro && aiConsent.hasGrantedConsent)
                          ? "A IA do Google Gemini está calculando suas metas personalizadas..."
                          : "Calculando suas metas fisiológicas iniciais...")
                         .font(.caption)
@@ -448,13 +461,13 @@ struct InitialOnboardingModalView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(FormaTheme.Colors.aiAccent.opacity(0.08))
+                .background((authManager.isPro ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand).opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else if let explanation = aiExplanation, !explanation.isEmpty {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: authManager.isPro ? "sparkles" : "bolt.heart.fill")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(FormaTheme.Colors.aiAccent)
+                        .foregroundStyle(authManager.isPro ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand)
                         .padding(.top, 2)
                     Text(explanation)
                         .font(.caption)
@@ -463,12 +476,16 @@ struct InitialOnboardingModalView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(FormaTheme.Colors.aiAccent.opacity(0.1))
+                .background((authManager.isPro ? FormaTheme.Colors.aiAccent : FormaTheme.Colors.brand).opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else if validCurrentWeight == nil || validHeight == nil {
-                Text("Informe seu peso atual e altura acima para gerar automaticamente a sugestão de metas com IA.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    authManager.isPro
+                        ? "Informe seu peso atual e altura acima para gerar automaticamente a sugestão de metas com IA."
+                        : "Informe seu peso atual e altura acima para calcular automaticamente suas metas diárias."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 12) {

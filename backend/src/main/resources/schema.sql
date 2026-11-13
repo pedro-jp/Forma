@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255),
     name VARCHAR(255),
     auth_provider VARCHAR(50) NOT NULL DEFAULT 'EMAIL', -- EMAIL, GOOGLE, APPLE
+    account_tier VARCHAR(20) NOT NULL DEFAULT 'FREE', -- FREE, PRO
     provider_id VARCHAR(255),
     apple_refresh_token VARCHAR(1024),
     google_refresh_token VARCHAR(1024),
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TIMESTAMP WITH TIME ZONE,
     last_synced_at TIMESTAMP WITH TIME ZONE
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS account_tier VARCHAR(20) DEFAULT 'FREE';
 
 -- 3. Perfil e Metas do Usuário
 CREATE TABLE IF NOT EXISTS user_profiles (

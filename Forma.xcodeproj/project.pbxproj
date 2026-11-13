@@ -43,6 +43,7 @@
 		CF5EFDAD307E8E47006A8F99 /* Forma.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Forma.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF5EFE07307E8E47006A8F99 /* FormaWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FormaWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF5EFE21307E8E47006A8F99 /* FormaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FormaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CF5EFE51307E8E47006A8F99 /* FormaWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FormaWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -59,6 +60,11 @@
 		CF5EFE22307E8E47006A8F99 /* FormaTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FormaTests;
+			sourceTree = "<group>";
+		};
+		CF5EFE50307E8E47006A8F99 /* FormaWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FormaWatch;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -79,6 +85,11 @@
 			files = (
 			);
 		};
+		CF5EFE54307E8E47006A8F99 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -87,6 +98,7 @@
 			children = (
 				CF5EFDAF307E8E47006A8F99 /* Forma */,
 				CF5EFE01307E8E47006A8F99 /* FormaWidgets */,
+				CF5EFE50307E8E47006A8F99 /* FormaWatch */,
 				CF5EFE22307E8E47006A8F99 /* FormaTests */,
 				CF5EFDAE307E8E47006A8F99 /* Products */,
 			);
@@ -97,6 +109,7 @@
 			children = (
 				CF5EFDAD307E8E47006A8F99 /* Forma.app */,
 				CF5EFE07307E8E47006A8F99 /* FormaWidgetsExtension.appex */,
+				CF5EFE51307E8E47006A8F99 /* FormaWatch.app */,
 				CF5EFE21307E8E47006A8F99 /* FormaTests.xctest */,
 			);
 			name = Products;
@@ -166,6 +179,24 @@
 			productReference = CF5EFE21307E8E47006A8F99 /* FormaTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		CF5EFE52307E8E47006A8F99 /* FormaWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CF5EFE56307E8E49006A8F99 /* Build configuration list for PBXNativeTarget "FormaWatch" */;
+			buildPhases = (
+				CF5EFE53307E8E47006A8F99 /* Sources */,
+				CF5EFE54307E8E47006A8F99 /* Frameworks */,
+				CF5EFE55307E8E47006A8F99 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				CF5EFE50307E8E47006A8F99 /* FormaWatch */,
+			);
+			name = FormaWatch;
+			productName = FormaWatch;
+			productReference = CF5EFE51307E8E47006A8F99 /* FormaWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -192,6 +223,11 @@
 						ProvisioningStyle = Automatic;
 						TestTargetID = CF5EFDAC307E8E47006A8F99;
 					};
+					CF5EFE52307E8E47006A8F99 = {
+						CreatedOnToolsVersion = 27.1;
+						DevelopmentTeam = Q42LJ4LG32;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = CF5EFDA8307E8E47006A8F99 /* Build configuration list for PBXProject "Forma" */;
@@ -210,6 +246,7 @@
 			targets = (
 				CF5EFDAC307E8E47006A8F99 /* Forma */,
 				CF5EFE02307E8E47006A8F99 /* FormaWidgetsExtension */,
+				CF5EFE52307E8E47006A8F99 /* FormaWatch */,
 				CF5EFE27307E8E47006A8F99 /* FormaTests */,
 			);
 		};
@@ -231,6 +268,11 @@
 			files = (
 			);
 		};
+		CF5EFE55307E8E47006A8F99 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -245,6 +287,11 @@
 			);
 		};
 		CF5EFE23307E8E47006A8F99 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		CF5EFE53307E8E47006A8F99 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -581,6 +628,74 @@
 			};
 			name = Release;
 		};
+		CF5EFE57307E8E49006A8F99 /* Debug configuration for PBXNativeTarget "FormaWatch" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q42LJ4LG32;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Forma;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "O Forma Watch acompanha seus batimentos cardíacos e calorias durante o treino.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "O Forma Watch salva seus treinos e gasto calórico no Apple Saúde.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = jota.Forma;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jota.Forma.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		CF5EFE58307E8E49006A8F99 /* Release configuration for PBXNativeTarget "FormaWatch" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q42LJ4LG32;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Forma;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "O Forma Watch acompanha seus batimentos cardíacos e calorias durante o treino.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "O Forma Watch salva seus treinos e gasto calórico no Apple Saúde.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = jota.Forma;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jota.Forma.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -613,6 +728,14 @@
 			buildConfigurations = (
 				CF5EFE28307E8E49006A8F99 /* Debug configuration for PBXNativeTarget "FormaTests" */,
 				CF5EFE29307E8E49006A8F99 /* Release configuration for PBXNativeTarget "FormaTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		CF5EFE56307E8E49006A8F99 /* Build configuration list for PBXNativeTarget "FormaWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CF5EFE57307E8E49006A8F99 /* Debug configuration for PBXNativeTarget "FormaWatch" */,
+				CF5EFE58307E8E49006A8F99 /* Release configuration for PBXNativeTarget "FormaWatch" */,
 			);
 			defaultConfigurationName = Release;
 		};

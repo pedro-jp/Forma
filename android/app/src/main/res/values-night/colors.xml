@@ -1,0 +1,7 @@
+<resources>
+    <!-- Cores do Design System (Assets.xcassets / modo escuro) -->
+    <color name="forma_card_background">#11161A</color>
+    <color name="forma_font_normal">#FFFFFF</color>
+    <color name="forma_page_background">#000000</color>
+    <color name="forma_system_background">#000000</color>
+</resources>

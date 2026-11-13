@@ -100,6 +100,7 @@ struct FoodAnalysisPhaseBadge: View {
 struct FoodPlateResultCard: View {
     let intent: VoiceFoodIntent
     let isAnalyzing: Bool
+    var isPro: Bool = true
     let onUpdateMealType: (MealType) -> Void
     let onRecalculateAI: () -> Void
     let onAdjustPortion: (UUID, Double) -> Void
@@ -113,7 +114,7 @@ struct FoodPlateResultCard: View {
                 headerRow
                 macroRow
 
-                if !intent.aiSummary.isEmpty {
+                if isPro && !intent.aiSummary.isEmpty {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 12, weight: .semibold))
@@ -135,6 +136,7 @@ struct FoodPlateResultCard: View {
                         PlateRecognizedItemRow(
                             item: item,
                             canRemove: intent.items.count > 1,
+                            isPro: isPro,
                             onAdjustPortion: { delta in onAdjustPortion(item.id, delta) },
                             onEditExactPortion: { onEditExactPortion(item) },
                             onRemove: { onRemoveItem(item.id) }
@@ -187,23 +189,25 @@ struct FoodPlateResultCard: View {
             VStack(alignment: .trailing, spacing: 8) {
                 MealTypeSelectMenu(selectedMeal: intent.mealType, onSelect: onUpdateMealType)
 
-                Button(action: onRecalculateAI) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("Recalcular")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .lineLimit(1)
+                if isPro {
+                    Button(action: onRecalculateAI) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Recalcular")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(FormaTheme.Colors.aiAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(FormaTheme.Colors.aiAccent.opacity(0.12))
+                        .clipShape(Capsule())
+                        .fixedSize(horizontal: true, vertical: false)
                     }
-                    .foregroundStyle(FormaTheme.Colors.aiAccent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(FormaTheme.Colors.aiAccent.opacity(0.12))
-                    .clipShape(Capsule())
-                    .fixedSize(horizontal: true, vertical: false)
+                    .buttonStyle(.plain)
+                    .disabled(isAnalyzing)
                 }
-                .buttonStyle(.plain)
-                .disabled(isAnalyzing)
             }
         }
     }
@@ -220,6 +224,7 @@ struct FoodPlateResultCard: View {
 struct PlateRecognizedItemRow: View {
     let item: VoicePlateItem
     let canRemove: Bool
+    var isPro: Bool = true
     let onAdjustPortion: (Double) -> Void
     let onEditExactPortion: () -> Void
     let onRemove: () -> Void
@@ -247,11 +252,11 @@ struct PlateRecognizedItemRow: View {
                             .lineLimit(2)
 
                         let lowerSource = item.source.lowercased()
-                        let isPhotoSource = lowerSource.contains("foto")
+                        let isPhotoSource = isPro && lowerSource.contains("foto")
                         let isHistorySource = lowerSource.contains("hist")
-                        let isFormaSource = isPhotoSource || lowerSource.contains("ia") || lowerSource.contains("gemini") || lowerSource.contains("forma")
+                        let isFormaSource = isPro && (isPhotoSource || lowerSource.contains("ia") || lowerSource.contains("gemini") || lowerSource.contains("forma"))
                         let badgeColor = isFormaSource ? FormaTheme.Colors.aiAccent : (isHistorySource ? FormaTheme.Colors.brand : FormaTheme.Colors.tacoCyan)
-                        let badgeTitle = isPhotoSource ? "FOTO" : (isHistorySource ? "HÁBITO" : "FORMA")
+                        let badgeTitle = isPhotoSource ? "FOTO" : (isHistorySource ? "HÁBITO" : (isFormaSource ? "IA FORMA" : "TACO"))
                         let badgeIcon = isPhotoSource ? "camera.fill" : (isFormaSource ? "sparkles" : (isHistorySource ? "clock.arrow.circlepath" : "book.closed.fill"))
 
                         HStack(spacing: 3) {

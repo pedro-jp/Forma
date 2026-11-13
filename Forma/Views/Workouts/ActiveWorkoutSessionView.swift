@@ -26,6 +26,8 @@ struct ActiveWorkoutSessionView: View {
     @State private var sessionStartDate: Date = Date()
     @State private var currentExerciseIndex: Int = 0
     @State private var elapsedSeconds: Int = 0
+    @State private var lastCompletedExerciseIndex: Int? = nil
+    @State private var lastCompletedSetIndex: Int? = nil
 
     @State private var restStartDate: Date? = nil
     @State private var restEndDate: Date? = nil
@@ -82,6 +84,16 @@ struct ActiveWorkoutSessionView: View {
         return (minutes * ratePerMinute).rounded()
     }
 
+    private var lastCompletedSetBannerLabel: String? {
+        if let exIdx = lastCompletedExerciseIndex, exIdx < exercises.count,
+           let setIdx = lastCompletedSetIndex {
+            let ex = exercises[exIdx]
+            let w = ex.weightForSet(setIdx)
+            return "Série \(setIdx + 1) feita: \(WorkoutExerciseItem.formatWeightKg(w))"
+        }
+        return nil
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -97,7 +109,11 @@ struct ActiveWorkoutSessionView: View {
                             restEndDate: restEndDate,
                             restTimeRemaining: restTimeRemaining,
                             restTimeTotal: restTimeTotal,
+                            lastSetLabel: lastCompletedSetBannerLabel,
                             onAdjustSeconds: { delta in adjustRestSeconds(delta) },
+                            onAdjustLastSetWeight: { deltaKg in
+                                adjustRecentSetWeight(deltaKg: deltaKg)
+                            },
                             onSkip: { stopRestTimer() }
                         )
                         .padding(.horizontal, 16)
@@ -127,6 +143,9 @@ struct ActiveWorkoutSessionView: View {
                                     },
                                     onToggleSet: { setIndex in
                                         toggleSetCompletion(exerciseIndex: exIndex, setIndex: setIndex)
+                                    },
+                                    onAdjustSetWeight: { setIndex, deltaKg in
+                                        adjustSetWeight(exerciseIndex: exIndex, setIndex: setIndex, deltaKg: deltaKg)
                                     }
                                 )
                             }
@@ -214,7 +233,7 @@ struct ActiveWorkoutSessionView: View {
                         finishAndSaveWorkout()
                         return
                     }
-                    if shared.completedSetsCount != completedSetsCount || shared.isResting != isRestTimerActive {
+                    if shared.completedSetsCount != completedSetsCount || shared.isResting != isRestTimerActive || shared.exercises != exercises {
                         syncFromSharedSession()
                     }
                 }
@@ -351,6 +370,9 @@ struct ActiveWorkoutSessionView: View {
         exercises[exerciseIndex].completedSets = currentSets
 
         if willBeDone {
+            lastCompletedExerciseIndex = exerciseIndex
+            lastCompletedSetIndex = setIndex
+
             let feedback = UIImpactFeedbackGenerator(style: .medium)
             feedback.impactOccurred()
 
@@ -363,6 +385,7 @@ struct ActiveWorkoutSessionView: View {
                 nextExerciseNameForRest = exercises[exerciseIndex].name
                 nextTotalSetsForRest = exercises[exerciseIndex].sets
             } else if exerciseIndex + 1 < exercises.count {
+                currentExerciseIndex = exerciseIndex + 1
                 nextSetForRest = 1
                 nextExerciseNameForRest = exercises[exerciseIndex + 1].name
                 nextTotalSetsForRest = exercises[exerciseIndex + 1].sets
@@ -375,10 +398,69 @@ struct ActiveWorkoutSessionView: View {
             let targetRest = exercises[exerciseIndex].restSeconds > 0 ? exercises[exerciseIndex].restSeconds : initialRestSeconds
             startRestTimer(seconds: targetRest, exerciseName: nextExerciseNameForRest, currentSet: nextSetForRest, totalSets: nextTotalSetsForRest)
         } else {
+            if lastCompletedExerciseIndex == exerciseIndex && lastCompletedSetIndex == setIndex {
+                lastCompletedExerciseIndex = nil
+                lastCompletedSetIndex = nil
+            }
+            if isRestTimerActive {
+                isRestTimerActive = false
+                restStartDate = nil
+                restEndDate = nil
+                WorkoutNotificationManager.shared.cancelRestNotification()
+            }
+            saveCurrentStateToShared()
             updateLiveActivity(isResting: false)
         }
+    }
+
+    private func adjustSetWeight(exerciseIndex: Int, setIndex: Int, deltaKg: Double) {
+        guard exerciseIndex >= 0, exerciseIndex < exercises.count else { return }
+        var ex = exercises[exerciseIndex]
+        while ex.setWeights.count < ex.sets {
+            ex.setWeights.append(ex.weightForSet(ex.setWeights.count))
+        }
+        guard setIndex >= 0, setIndex < ex.setWeights.count else { return }
+        let updated = max(0.0, ((ex.setWeights[setIndex] + deltaKg) * 2.0).rounded() / 2.0)
+        ex.setWeights[setIndex] = updated
+
+        // Propaga a nova carga para as séries seguintes ainda não concluídas deste exercício
+        for idx in (setIndex + 1)..<ex.sets {
+            let done = idx < ex.completedSets.count ? ex.completedSets[idx] : false
+            if !done {
+                ex.setWeights[idx] = updated
+            }
+        }
+        ex.suggestedWeight = WorkoutExerciseItem.formatWeightKg(ex.averageWeightKg)
+        exercises[exerciseIndex] = ex
+
+        let feedback = UIImpactFeedbackGenerator(style: .light)
+        feedback.impactOccurred()
 
         saveCurrentStateToShared()
+        updateLiveActivity(isResting: isRestTimerActive)
+    }
+
+    private func adjustRecentSetWeight(deltaKg: Double) {
+        if let exIdx = lastCompletedExerciseIndex, let setIdx = lastCompletedSetIndex {
+            adjustSetWeight(exerciseIndex: exIdx, setIndex: setIdx, deltaKg: deltaKg)
+        } else {
+            let safeEx = min(max(0, currentExerciseIndex), max(0, exercises.count - 1))
+            let safeSet = exercises.isEmpty ? 0 : min(max(0, exercises[safeEx].completedCount), max(0, exercises[safeEx].sets - 1))
+            adjustSetWeight(exerciseIndex: safeEx, setIndex: safeSet, deltaKg: deltaKg)
+        }
+    }
+
+    private func currentLiveWeightsInfo() -> (currentWeight: Double, lastSetNum: Int, lastWeight: Double, lastExName: String) {
+        let safeIndex = min(max(0, currentExerciseIndex), max(0, exercises.count - 1))
+        let currentSetIdx = exercises.isEmpty ? 0 : min(max(0, exercises[safeIndex].completedCount), max(0, exercises[safeIndex].sets - 1))
+        let currentW = exercises.isEmpty ? 0.0 : exercises[safeIndex].weightForSet(currentSetIdx)
+
+        if let lastEx = lastCompletedExerciseIndex, lastEx < exercises.count,
+           let lastSet = lastCompletedSetIndex {
+            let ex = exercises[lastEx]
+            return (currentW, lastSet + 1, ex.weightForSet(lastSet), ex.name)
+        }
+        return (currentW, 0, 0.0, "")
     }
 
     private func saveCurrentStateToShared() {
@@ -399,7 +481,9 @@ struct ActiveWorkoutSessionView: View {
             restStartDate: isRestTimerActive ? restStartDate : nil,
             restEndDate: isRestTimerActive ? restEndDate : nil,
             restDurationSeconds: restTimeTotal,
-            isAllCompleted: isAllDone
+            isAllCompleted: isAllDone,
+            lastCompletedExerciseIndex: lastCompletedExerciseIndex,
+            lastCompletedSetIndex: lastCompletedSetIndex
         )
         SharedWorkoutSessionManager.shared.saveSession(sharedState)
     }
@@ -408,6 +492,8 @@ struct ActiveWorkoutSessionView: View {
         guard let shared = SharedWorkoutSessionManager.shared.loadSession() else { return }
         exercises = shared.exercises
         currentExerciseIndex = shared.currentExerciseIndex
+        lastCompletedExerciseIndex = shared.lastCompletedExerciseIndex
+        lastCompletedSetIndex = shared.lastCompletedSetIndex
         sessionStartDate = shared.sessionStartDate
         elapsedSeconds = max(0, Int(Date().timeIntervalSince(shared.sessionStartDate)))
         if shared.isResting, let end = shared.restEndDate {
@@ -431,12 +517,20 @@ struct ActiveWorkoutSessionView: View {
     }
 
     private func startNewSession() {
+        let userBodyWeight = (try? modelContext.fetch(FetchDescriptor<Profile>()).first?.currentWeight) ?? 75.0
+        exercises = SharedWorkoutSessionManager.shared.prepareExercisesWithInitialWeights(
+            exercises,
+            userBodyWeightKg: userBodyWeight
+        )
         sessionStartDate = Date()
         elapsedSeconds = 0
+        lastCompletedExerciseIndex = nil
+        lastCompletedSetIndex = nil
         saveCurrentStateToShared()
 
         let firstExName = exercises.first?.name ?? "Treino"
         let firstSets = exercises.first?.sets ?? 3
+        let firstWeight = exercises.first?.weightForSet(0) ?? 15.0
         LiveActivityManager.shared.startWorkoutActivity(
             workoutTitle: title,
             currentExerciseName: firstExName,
@@ -448,7 +542,8 @@ struct ActiveWorkoutSessionView: View {
             workoutStartDate: sessionStartDate,
             isResting: false,
             restDurationSeconds: initialRestSeconds,
-            isAllCompleted: false
+            isAllCompleted: false,
+            currentSetWeightKg: firstWeight
         )
     }
 
@@ -464,11 +559,13 @@ struct ActiveWorkoutSessionView: View {
         }
 
         saveCurrentStateToShared()
+        let wInfo = currentLiveWeightsInfo()
 
         WorkoutNotificationManager.shared.scheduleRestNotification(
             seconds: seconds,
             exerciseName: exerciseName,
-            nextSet: currentSet
+            nextSet: currentSet,
+            lastSetWeightKg: wInfo.lastWeight > 0 ? wInfo.lastWeight : wInfo.currentWeight
         )
 
         LiveActivityManager.shared.updateWorkoutActivity(
@@ -483,7 +580,11 @@ struct ActiveWorkoutSessionView: View {
             isResting: true,
             restStartDate: now,
             restEndDate: end,
-            restDurationSeconds: seconds
+            restDurationSeconds: seconds,
+            currentSetWeightKg: wInfo.currentWeight,
+            lastCompletedSetNumber: wInfo.lastSetNum,
+            lastCompletedSetWeightKg: wInfo.lastWeight,
+            lastCompletedExerciseName: wInfo.lastExName
         )
     }
 
@@ -515,10 +616,12 @@ struct ActiveWorkoutSessionView: View {
 
         let currentEx = currentExerciseIndex < exercises.count ? exercises[currentExerciseIndex] : (exercises.first ?? WorkoutExerciseItem(name: "Treino"))
         let activeSetNumber = min(currentEx.sets, max(1, currentEx.completedCount + 1))
+        let wInfo = currentLiveWeightsInfo()
         WorkoutNotificationManager.shared.scheduleRestNotification(
             seconds: remaining,
             exerciseName: currentEx.name,
-            nextSet: activeSetNumber
+            nextSet: activeSetNumber,
+            lastSetWeightKg: wInfo.lastWeight > 0 ? wInfo.lastWeight : wInfo.currentWeight
         )
 
         LiveActivityManager.shared.updateWorkoutActivity(
@@ -533,13 +636,18 @@ struct ActiveWorkoutSessionView: View {
             isResting: true,
             restStartDate: restStartDate,
             restEndDate: newEnd,
-            restDurationSeconds: restTimeTotal
+            restDurationSeconds: restTimeTotal,
+            currentSetWeightKg: wInfo.currentWeight,
+            lastCompletedSetNumber: wInfo.lastSetNum,
+            lastCompletedSetWeightKg: wInfo.lastWeight,
+            lastCompletedExerciseName: wInfo.lastExName
         )
     }
 
     private func updateLiveActivity(isResting: Bool) {
         let currentEx = currentExerciseIndex < exercises.count ? exercises[currentExerciseIndex] : (exercises.first ?? WorkoutExerciseItem(name: "Treino"))
         let activeSetNumber = min(currentEx.sets, max(1, currentEx.completedCount + 1))
+        let wInfo = currentLiveWeightsInfo()
         LiveActivityManager.shared.updateWorkoutActivity(
             workoutTitle: title,
             currentExerciseName: currentEx.name,
@@ -552,7 +660,11 @@ struct ActiveWorkoutSessionView: View {
             isResting: isResting,
             restStartDate: isResting ? restStartDate : nil,
             restEndDate: isResting ? restEndDate : nil,
-            restDurationSeconds: restTimeTotal
+            restDurationSeconds: restTimeTotal,
+            currentSetWeightKg: wInfo.currentWeight,
+            lastCompletedSetNumber: wInfo.lastSetNum,
+            lastCompletedSetWeightKg: wInfo.lastWeight,
+            lastCompletedExerciseName: wInfo.lastExName
         )
     }
 
@@ -566,12 +678,33 @@ struct ActiveWorkoutSessionView: View {
     }
 
     private func finishAndSaveWorkout() {
+        // Registra a carga média realizada de cada exercício para iniciar com ela na próxima vez!
+        SharedWorkoutSessionManager.shared.recordExerciseWeightsHistory(from: exercises)
+        if let routine = routineToUpdate {
+            var updatedExercises = exercises
+            for idx in updatedExercises.indices {
+                let avg = updatedExercises[idx].averageWeightKg
+                if avg > 0 {
+                    updatedExercises[idx].suggestedWeight = WorkoutExerciseItem.formatWeightKg(avg)
+                }
+                updatedExercises[idx].completedSets = Array(repeating: false, count: updatedExercises[idx].sets)
+            }
+            routine.exercises = updatedExercises
+        }
+
         stopAllTimers()
 
         let finalSeconds = max(0, Int(Date().timeIntervalSince(sessionStartDate)))
         let finalDuration = max(1, finalSeconds / 60)
         let finalCalories = liveEstimatedCalories
-        let workoutNotes = "Checklist: \(completedSetsCount) de \(totalSetsCount) séries concluídas em \(formatTime(finalSeconds))."
+        let weightsSummary = exercises
+            .filter { $0.averageWeightKg > 0 }
+            .prefix(4)
+            .map { "\($0.name): \(WorkoutExerciseItem.formatWeightKg($0.averageWeightKg))" }
+            .joined(separator: " • ")
+        let workoutNotes = weightsSummary.isEmpty
+            ? "Checklist: \(completedSetsCount) de \(totalSetsCount) séries concluídas em \(formatTime(finalSeconds))."
+            : "Checklist: \(completedSetsCount)/\(totalSetsCount) séries (\(formatTime(finalSeconds))). Cargas: \(weightsSummary)"
 
         let entry = WorkoutEntry(
             title: title,

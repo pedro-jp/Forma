@@ -39,3 +39,8 @@ Secrets.plist
 *.mv.db
 *.lock.db
 *.trace.db
+
+# Local tooling & promo renders
+.antigravity/
+scripts/
+/forma_promo_*.mp4

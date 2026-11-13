@@ -1,567 +1,431 @@
 package com.forma.app.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.forma.app.data.catalog.ExerciseCatalog
+import com.forma.app.data.catalog.ExerciseCatalogItem
 import com.forma.app.data.model.WorkoutEntry
 import com.forma.app.data.model.WorkoutRoutine
+import com.forma.app.data.model.WorkoutType
 import com.forma.app.data.repository.FormaRepository
-import com.forma.app.ui.theme.DarkCard
-import com.forma.app.ui.theme.PrimaryGreen
+import com.forma.app.data.services.SharedWorkoutSessionManager
+import com.forma.app.ui.components.FormaBadge
+import com.forma.app.ui.components.FormaCard
+import com.forma.app.ui.components.FormaEmptyState
+import com.forma.app.ui.components.FormaScreenHeader
+import com.forma.app.ui.components.FormaScrollScreen
+import com.forma.app.ui.components.FormaSecondaryButton
+import com.forma.app.ui.components.FormaSectionHeader
+import com.forma.app.ui.components.formaPlainClickable
+import com.forma.app.ui.components.sfSymbol
+import com.forma.app.ui.screens.workouts.AIWorkoutLoggerSheet
+import com.forma.app.ui.screens.workouts.ActiveWorkoutRequest
+import com.forma.app.ui.screens.workouts.ActiveWorkoutSessionDialog
+import com.forma.app.ui.screens.workouts.AddWorkoutSheet
+import com.forma.app.ui.screens.workouts.ExerciseDetailSheet
+import com.forma.app.ui.screens.workouts.PtBr
+import com.forma.app.ui.screens.workouts.RoutineCard
+import com.forma.app.ui.screens.workouts.WorkoutCard
+import com.forma.app.ui.screens.workouts.capitalizedPt
+import com.forma.app.ui.screens.workouts.consumePendingWorkoutIfAny
+import com.forma.app.ui.screens.workouts.rememberNotificationPermissionGate
+import com.forma.app.ui.screens.workouts.toPlan
+import com.forma.app.ui.theme.FormaTheme
+import com.forma.app.ui.theme.FormaTypography
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
+import kotlin.math.roundToInt
 
+/**
+ * Porte de `WorkoutsView` (iOS): painel de Treinos & Atividades com consistência semanal, assistente IA, fichas
+ * (favoritas no topo) e histórico de sessões.
+ */
 @Composable
 fun WorkoutsScreen(
     repository: FormaRepository
 ) {
-    val coroutineScope = rememberCoroutineScope()
-    val workoutEntries by repository.workoutEntries.collectAsState()
-    val workoutRoutines by repository.workoutRoutines.collectAsState()
-    val isWorkoutActive by repository.isWorkoutActive.collectAsState()
-    val workoutDurationSeconds by repository.workoutDurationSeconds.collectAsState()
+    val context = LocalContext.current
+    val colors = FormaTheme.Colors
+    val scope = rememberCoroutineScope()
 
-    var showAddWorkoutDialog by remember { mutableStateOf(false) }
-    var showStartLiveWorkoutDialog by remember { mutableStateOf(false) }
-    var isAnalyzingAI by remember { mutableStateOf(false) }
-    var aiErrorMessage by remember { mutableStateOf<String?>(null) }
+    val workouts by repository.workoutEntries.collectAsState()
+    val routines by repository.workoutRoutines.collectAsState()
+    val healthActiveCalories by repository.healthActiveCalories.collectAsState()
+    val routerShowAIWorkout by repository.router.showAIWorkoutSheet.collectAsState()
 
-    // Date selector for top calendar
-    val calendarDays = remember {
-        val cal = Calendar.getInstance()
-        val list = mutableListOf<Date>()
-        cal.add(Calendar.DAY_OF_YEAR, -3)
-        for (i in 0..6) {
-            list.add(cal.time)
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        }
-        list
+    var showAddWorkout by remember { mutableStateOf(false) }
+    var showAIWorkout by remember { mutableStateOf(false) }
+    var selectedExerciseForDetail by remember { mutableStateOf<ExerciseCatalogItem?>(null) }
+    val notificationGate = rememberNotificationPermissionGate()
+
+    // .onAppear { healthVM.loadHealthData(); syncExternalHealthWorkoutsInBackground }
+    LaunchedEffect(Unit) {
+        runCatching { repository.syncTodayData(skipCloudSyncTrigger = true) }
+        runCatching { repository.syncExternalHealthWorkoutsInBackground() }
     }
-    var selectedDateIndex by remember { mutableIntStateOf(3) } // today
 
-    val dayFormat = SimpleDateFormat("EEE", Locale("pt", "BR"))
-    val numFormat = SimpleDateFormat("d", Locale("pt", "BR"))
+    // Treino finalizado pela notificação enquanto o app estava em segundo plano (FormaApp.checkPendingWorkout)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch { runCatching { consumePendingWorkoutIfAny(context, repository) } }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF030712))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
-        Spacer(modifier = Modifier.height(58.dp))
+    val sortedRoutines = remember(routines) { routines.filter { it.isFavorite } + routines.filter { !it.isFavorite } }
 
-        // CALENDAR AT THE TOP (User rule: "na aba de treino mude o calendario para o topo")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Treinos & Rotinas",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+    // Semana (segunda a domingo)
+    val zone = remember { ZoneId.systemDefault() }
+    val today = LocalDate.now(zone)
+    val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val weekDays = (0L until 7L).map { weekStart.plusDays(it) }
+    val weekStartMillis = weekStart.atStartOfDay(zone).toInstant().toEpochMilli()
+    val weekEndMillis = weekStart.plusDays(7).atStartOfDay(zone).toInstant().toEpochMilli()
+    val workoutsThisWeek = workouts.filter { it.workoutDate >= weekStartMillis && it.workoutDate <= weekEndMillis }
+    val totalMinutesWeek = workoutsThisWeek.sumOf { it.durationMinutes }
+    val totalCaloriesBurnedWeek = workoutsThisWeek.sumOf { it.caloriesBurned }
+    val trainedDays = workouts.map { Instant.ofEpochMilli(it.workoutDate).atZone(zone).toLocalDate() }.toSet()
 
-            FloatingActionButton(
-                onClick = {
-                    aiErrorMessage = null
-                    showAddWorkoutDialog = true
-                },
-                containerColor = PrimaryGreen,
-                contentColor = Color.Black,
-                shape = CircleShape,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar Treino")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Week Calendar Strip
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            calendarDays.forEachIndexed { index, date ->
-                val isSelected = index == selectedDateIndex
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) PrimaryGreen else DarkCard,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { selectedDateIndex = index }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = dayFormat.format(date).uppercase().replace(".", ""),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSelected) Color.Black else Color(0xFF94A3B8)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = numFormat.format(date),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isSelected) Color.Black else Color.White
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Active Workout Banner / Start Live Workout Card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isWorkoutActive) Color(0xFFEF4444).copy(alpha = 0.15f) else DarkCard
-            ),
-            border = if (isWorkoutActive) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)) else null,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (isWorkoutActive) Color(0xFFEF4444).copy(alpha = 0.2f) else PrimaryGreen.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isWorkoutActive) Icons.Default.DirectionsRun else Icons.Default.Timer,
-                            contentDescription = null,
-                            tint = if (isWorkoutActive) Color(0xFFEF4444) else PrimaryGreen,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = if (isWorkoutActive) "Treino Ativo na Ilha" else "Iniciar Treino com Ilha",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            fontSize = 15.sp
-                        )
-                        if (isWorkoutActive) {
-                            val mins = workoutDurationSeconds / 60
-                            val secs = workoutDurationSeconds % 60
-                            val burnedEst = (workoutDurationSeconds * 0.12).toInt()
-                            Text(
-                                text = String.format("%02d:%02d • ~%d kcal queimadas", mins, secs, burnedEst),
-                                color = Color(0xFFFCA5A5),
-                                fontSize = 13.sp
-                            )
-                        } else {
-                            Text(
-                                text = "Acompanhamento no recorte do celular",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        if (isWorkoutActive) {
-                            coroutineScope.launch {
-                                repository.stopWorkout()
-                            }
-                        } else {
-                            showStartLiveWorkoutDialog = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isWorkoutActive) Color(0xFFEF4444) else PrimaryGreen,
-                        contentColor = if (isWorkoutActive) Color.White else Color.Black
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(
-                        text = if (isWorkoutActive) "Encerrar" else "Iniciar",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // History of Workouts & Routines
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Routines Section (especially those generated by AI analysis)
-            if (workoutRoutines.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Rotinas Salvas & Sugeridas",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-
-                items(workoutRoutines) { routine ->
-                    RoutineCard(
-                        routine = routine,
-                        onStart = {
-                            coroutineScope.launch {
-                                repository.startWorkout(routine.title)
-                            }
-                        }
-                    )
-                }
-            }
-
-            item {
-                Text(
-                    text = "Treinos Realizados",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(vertical = 4.dp)
+    FormaScrollScreen(horizontalPadding = 0.dp, topPadding = 10.dp, bottomPadding = 36.dp) {
+        FormaScreenHeader(
+            title = "Atividade & Treinos",
+            subtitle = "Fichas, evolução muscular e consistência",
+            modifier = Modifier.padding(horizontal = FormaTheme.Spacing.screenHorizontal),
+            trailing = {
+                FormaSecondaryButton(
+                    title = "Manual",
+                    icon = sfSymbol("plus"),
+                    onClick = { showAddWorkout = true }
                 )
             }
-
-            if (workoutEntries.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Nenhum treino registrado ainda",
-                            color = Color(0xFF64748B),
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-            } else {
-                items(workoutEntries) { workout ->
-                    WorkoutItemCard(
-                        workout = workout,
-                        onDelete = {
-                            coroutineScope.launch {
-                                repository.deleteWorkoutEntry(workout.id)
-                            }
-                        }
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(40.dp))
-            }
-        }
-    }
-
-    // Start Live Workout Dialog
-    if (showStartLiveWorkoutDialog) {
-        var workoutName by remember { mutableStateOf("Treino de Musculação") }
-
-        AlertDialog(
-            onDismissRequest = { showStartLiveWorkoutDialog = false },
-            title = { Text("Iniciar Treino na Ilha Dinâmica") },
-            text = {
-                Column {
-                    Text(
-                        "O cronômetro e a queima calórica estimada ficarão ativos na Ilha Dinâmica no topo da tela do seu Android:",
-                        fontSize = 13.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = workoutName,
-                        onValueChange = { workoutName = it },
-                        label = { Text("Nome do Treino / Atividade") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showStartLiveWorkoutDialog = false
-                        coroutineScope.launch {
-                            repository.startWorkout(workoutName.trim().ifEmpty { "Treino" })
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen, contentColor = Color.Black)
-                ) {
-                    Text("Começar Treino")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showStartLiveWorkoutDialog = false }) {
-                    Text("Cancelar")
-                }
-            }
         )
-    }
 
-    // Add Workout with AI Dialog
-    if (showAddWorkoutDialog) {
-        var workoutText by remember { mutableStateOf("") }
-
-        AlertDialog(
-            onDismissRequest = { if (!isAnalyzingAI) showAddWorkoutDialog = false },
-            title = {
+        // weeklyConsistencyCard
+        FormaCard(
+            modifier = Modifier
+                .padding(horizontal = FormaTheme.Spacing.screenHorizontal)
+                .fillMaxWidth(),
+            padding = 20.dp
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = PrimaryGreen)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Adicionar Treino com IA")
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        "Descreva seu treino livremente. A IA calculará o gasto calórico, intensidade e detalhes da atividade:",
-                        fontSize = 13.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = workoutText,
-                        onValueChange = { workoutText = it },
-                        label = { Text("Ex: Treino pesado de costas e bíceps por 55 minutos") },
-                        minLines = 3,
-                        maxLines = 5,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (aiErrorMessage != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Semana Atual", color = colors.primaryText, style = FormaTypography.headline)
                         Text(
-                            text = aiErrorMessage ?: "",
-                            color = Color(0xFFEF4444),
-                            fontSize = 12.sp
+                            "Consistência e queima de Segunda a Domingo",
+                            color = colors.secondaryText,
+                            style = FormaTypography.caption
                         )
                     }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (workoutText.isBlank()) return@Button
-                        isAnalyzingAI = true
-                        aiErrorMessage = null
-                        coroutineScope.launch {
-                            val result = repository.analyzeWorkout(workoutText.trim())
-                            isAnalyzingAI = false
-                            if (result.isSuccess) {
-                                showAddWorkoutDialog = false
-                            } else {
-                                aiErrorMessage = result.exceptionOrNull()?.message ?: "Erro ao analisar treino."
-                            }
-                        }
-                    },
-                    enabled = !isAnalyzingAI,
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen, contentColor = Color.Black)
-                ) {
-                    if (isAnalyzingAI) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.Black,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("Analisar com IA")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showAddWorkoutDialog = false },
-                    enabled = !isAnalyzingAI
-                ) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
-}
-
-@Composable
-private fun RoutineCard(
-    routine: WorkoutRoutine,
-    onStart: () -> Unit
-) {
-    val isAi = routine.title.contains("GERADA POR IA", ignoreCase = true)
-
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkCard),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = routine.title.replace("[GERADA POR IA] ", ""),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = Color.White
+                    FormaBadge(
+                        text = "${workoutsThisWeek.size} treinos",
+                        icon = Icons.Filled.LocalFireDepartment,
+                        tint = colors.brand
                     )
-                    if (isAi) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = PrimaryGreen.copy(alpha = 0.2f)
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    weekDays.forEach { day ->
+                        val hasTrained = trainedDays.contains(day)
+                        val isToday = day == today
+                        val isFuture = day.isAfter(today)
+                        val dayLetter = day.dayOfWeek.getDisplayName(TextStyle.SHORT, PtBr).replace(".", "").capitalizedPt()
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "GERADA POR IA",
-                                color = PrimaryGreen,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                text = dayLetter,
+                                color = if (isToday) colors.brand else colors.secondaryText,
+                                style = FormaTypography.system(11f, if (isToday) FontWeight.Bold else FontWeight.Medium),
+                                maxLines = 1
                             )
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            hasTrained -> colors.brand
+                                            isToday -> colors.brandSoft
+                                            else -> colors.gray.copy(alpha = 0.12f)
+                                        }
+                                    )
+                                    .then(
+                                        if (isToday) Modifier.border(1.5.dp, colors.brand, CircleShape) else Modifier
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (hasTrained) {
+                                    Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                } else {
+                                    Text(
+                                        text = day.dayOfMonth.toString(),
+                                        color = when {
+                                            isFuture -> colors.secondaryText.copy(alpha = 0.35f)
+                                            isToday -> colors.brand
+                                            else -> colors.secondaryText
+                                        },
+                                        style = FormaTypography.rounded(12f, if (isToday) FontWeight.Bold else FontWeight.Medium)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                Button(
-                    onClick = onStart,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryGreen.copy(alpha = 0.2f),
-                        contentColor = PrimaryGreen
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Iniciar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(colors.primary.copy(alpha = 0.06f))
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WeekStat(title = "Tempo", value = "$totalMinutesWeek min", color = colors.primaryText, modifier = Modifier.weight(1f))
+                    WeekStat(
+                        title = "Gasto em Treinos",
+                        value = "${totalCaloriesBurnedWeek.roundToInt()} kcal",
+                        color = colors.energyGreen,
+                        modifier = Modifier.weight(1.2f)
+                    )
+                    WeekStat(
+                        title = "Ativas Hoje",
+                        value = "${healthActiveCalories.roundToInt()} kcal",
+                        color = colors.brand,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
+        }
 
-            if (routine.notes.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
+        // aiAssistantBanner
+        val bannerShape = RoundedCornerShape(20.dp)
+        Row(
+            modifier = Modifier
+                .padding(horizontal = FormaTheme.Spacing.screenHorizontal)
+                .fillMaxWidth()
+                .shadow(8.dp, bannerShape, ambientColor = Color.Black.copy(alpha = 0.03f), spotColor = Color.Black.copy(alpha = 0.03f))
+                .clip(bannerShape)
+                .background(colors.cardSurface)
+                .border(1.dp, colors.aiAccent.copy(alpha = 0.22f), bannerShape)
+                .formaPlainClickable { showAIWorkout = true }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(colors.aiGradient),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = routine.notes,
-                    color = Color(0xFF94A3B8),
-                    fontSize = 12.sp
+                    text = "Criar ou Calcular Treino",
+                    color = colors.primaryText,
+                    style = FormaTypography.rounded(15f, FontWeight.Bold),
+                    maxLines = 1
+                )
+                Text(
+                    text = "Inteligência Forma • gasto calórico, execução e ficha interativa",
+                    color = colors.secondaryText,
+                    style = FormaTypography.system(11f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(18.dp))
+        }
 
-            if (routine.exercises.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                routine.exercises.take(3).forEach { ex ->
-                    Text(
-                        text = "• ${ex.name} (${ex.sets} séries x ${ex.reps} reps)",
-                        fontSize = 12.sp,
-                        color = Color(0xFFCBD5E1)
+        // routinesSection
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            FormaSectionHeader(
+                title = "Minhas Fichas de Treino",
+                subtitle = "Favoritas no topo • checklist, Mini-Player e timer ao vivo",
+                modifier = Modifier.padding(horizontal = FormaTheme.Spacing.screenHorizontal),
+                trailing = {
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(colors.brandSoft)
+                            .formaPlainClickable { showAIWorkout = true }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(sfSymbol("plus"), contentDescription = null, tint = colors.brand, modifier = Modifier.size(12.dp))
+                        Text("Nova Ficha", color = colors.brand, style = FormaTypography.rounded(12f, FontWeight.Bold), maxLines = 1)
+                    }
+                }
+            )
+
+            if (sortedRoutines.isEmpty()) {
+                FormaCard(
+                    modifier = Modifier
+                        .padding(horizontal = FormaTheme.Spacing.screenHorizontal)
+                        .fillMaxWidth(),
+                    padding = 20.dp
+                ) {
+                    FormaEmptyState(
+                        icon = Icons.Filled.Checklist,
+                        title = "Nenhuma ficha salva",
+                        subtitle = "Crie sua primeira ficha com a Inteligência Forma para acompanhar séries, descanso e GIFs de execução.",
+                        actionTitle = "Criar Ficha",
+                        onAction = { showAIWorkout = true }
                     )
                 }
-                if (routine.exercises.size > 3) {
-                    Text(
-                        text = "+ mais ${routine.exercises.size - 3} exercícios",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
+            } else {
+                Column(
+                    modifier = Modifier.padding(horizontal = FormaTheme.Spacing.screenHorizontal),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    sortedRoutines.forEach { routine ->
+                        key(routine.id) {
+                            RoutineCard(
+                                routine = routine,
+                                onStart = {
+                                    notificationGate {
+                                        val req = ActiveWorkoutRequest.fromRoutine(routine)
+                                        SharedWorkoutSessionManager.get(context).resumeOrStart(
+                                            title = req.title,
+                                            workoutTypeRaw = req.workoutType.rawValue,
+                                            exercises = req.exercises,
+                                            baseCalories = req.baseCalories,
+                                            baseDurationMinutes = req.baseDurationMinutes,
+                                            initialRestSeconds = if (req.initialRestSeconds > 0) req.initialRestSeconds else 90,
+                                            targetMuscles = req.targetMuscles,
+                                            hypertrophyFocus = req.hypertrophyFocus
+                                        )
+                                    }
+                                },
+                                onToggleFavorite = { repository.toggleFavoriteRoutine(routine.id) },
+                                onDelete = { repository.deleteWorkoutRoutine(routine.id) },
+                                onShowExerciseDetail = { ex ->
+                                    selectedExerciseForDetail = ExerciseCatalog.item(ex.animationId)
+                                        ?: ExerciseCatalog.findBestMatch(ex.name)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // historySection
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = "Histórico de Sessões",
+                color = colors.primaryText,
+                style = FormaTypography.rounded(18f, FontWeight.Bold),
+                modifier = Modifier.padding(horizontal = FormaTheme.Spacing.screenHorizontal)
+            )
+
+            if (workouts.isEmpty()) {
+                FormaCard(
+                    modifier = Modifier
+                        .padding(horizontal = FormaTheme.Spacing.screenHorizontal)
+                        .fillMaxWidth(),
+                    padding = 20.dp
+                ) {
+                    FormaEmptyState(
+                        icon = Icons.Filled.FitnessCenter,
+                        title = "Nenhum treino registrado ainda",
+                        subtitle = "Inicie uma ficha com checklist ou registre seu treino manualmente."
                     )
+                }
+            } else {
+                Column(
+                    modifier = Modifier.padding(horizontal = FormaTheme.Spacing.screenHorizontal),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    workouts.forEach { workout ->
+                        key(workout.id) {
+                            WorkoutCard(
+                                workout = workout,
+                                onDelete = { repository.deleteWorkoutEntry(workout.id) }
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+
+    if (showAddWorkout) {
+        AddWorkoutSheet(onDismiss = { showAddWorkout = false })
+    }
+
+    if (showAIWorkout || routerShowAIWorkout) {
+        AIWorkoutLoggerSheet(
+            onDismiss = {
+                showAIWorkout = false
+                repository.router.setShowAIWorkoutSheet(false)
+            }
+        )
+    }
+
+    selectedExerciseForDetail?.let { item ->
+        ExerciseDetailSheet(item = item, onDismiss = { selectedExerciseForDetail = null })
+    }
 }
 
 @Composable
-private fun WorkoutItemCard(
-    workout: WorkoutEntry,
-    onDelete: () -> Unit
-) {
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkCard),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = workout.title,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${workout.caloriesBurned.toInt()} kcal",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFF97316)
-                    )
-                    Text("•", color = Color(0xFF64748B))
-                    Text("${workout.durationMinutes} min", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                    Text("•", color = Color(0xFF64748B))
-                    Text(workout.workoutType, fontSize = 12.sp, color = PrimaryGreen)
-                }
-            }
-
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector = Icons.Default.DeleteOutline,
-                    contentDescription = "Excluir",
-                    tint = Color(0xFF64748B)
-                )
-            }
-        }
+private fun WeekStat(title: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    val colors = FormaTheme.Colors
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(text = title, color = colors.secondaryText, style = FormaTypography.caption, maxLines = 1)
+        Text(
+            text = value,
+            color = color,
+            style = FormaTypography.rounded(17f, FontWeight.Bold),
+            maxLines = 1
+        )
     }
 }

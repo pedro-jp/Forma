@@ -19,6 +19,7 @@ struct HomeView: View {
 
     @StateObject private var healthVM = HealthViewModel()
     @ObservedObject private var router = AppNavigationRouter.shared
+    @ObservedObject private var authManager = AuthManager.shared
 
     @State private var activeMetric: FocusMetric = .consumed
     @State private var showAddWorkoutSheet: Bool = false
@@ -142,6 +143,7 @@ struct HomeView: View {
                     )
 
                     HomeDailyLogsSection(
+                        isPro: authManager.isPro,
                         foodsToday: foodsToday,
                         workoutsToday: workoutsToday,
                         steps: healthVM.steps,
@@ -195,6 +197,12 @@ struct HomeView: View {
             .onChange(of: allWorkouts.count) { _, _ in syncWidgetsAndLiveActivity() }
             .onChange(of: healthVM.activeCalories) { _, _ in syncWidgetsAndLiveActivity() }
             .onChange(of: healthVM.steps) { _, _ in syncWidgetsAndLiveActivity() }
+            .onChange(of: authManager.accountTier) { _, newTier in
+                if newTier == .free {
+                    openCameraInFoodSheet = false
+                    router.cutAllAIFlowsForFreeTier()
+                }
+            }
             .task {
                 FormaDataStore.shared.ensureSingleProfile(in: modelContext)
                 if healthRecords.isEmpty {
@@ -269,11 +277,35 @@ struct HomeView: View {
 
             Spacer()
 
-            FormaBadge(
-                text: objetivo == .gain ? "Ganho" : (objetivo == .lose ? "Perda" : "Manutenção"),
-                icon: objetivo.icon,
-                tint: FormaTheme.Colors.brand
-            )
+            VStack(alignment: .trailing, spacing: 6) {
+                if authManager.isPro {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("PRO")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(FormaTheme.Colors.aiGradient)
+                    .clipShape(Capsule())
+                } else {
+                    Text("Essencial")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Capsule())
+                }
+
+                FormaBadge(
+                    text: objetivo == .gain ? "Ganho" : (objetivo == .lose ? "Perda" : "Manutenção"),
+                    icon: objetivo.icon,
+                    tint: FormaTheme.Colors.brand
+                )
+            }
         }
     }
 

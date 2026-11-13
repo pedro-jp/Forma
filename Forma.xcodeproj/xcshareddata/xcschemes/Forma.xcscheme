@@ -13,19 +13,11 @@
             buildForProfiling = "YES"
             buildForArchiving = "YES"
             buildForAnalyzing = "YES">
-            <AutocreatedTestPlanReference>
-            </AutocreatedTestPlanReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CF5EFDAC307E8E47006A8F99"
                BuildableName = "Forma.app"
+               BlueprintName = "Forma"
                ReferencedContainer = "container:Forma.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -36,7 +28,7 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldAutocreateTestPlan = "NO">
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -68,15 +60,10 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CF5EFDAC307E8E47006A8F99"
             BuildableName = "Forma.app"
+            BlueprintName = "Forma"
             ReferencedContainer = "container:Forma.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-         <CommandLineArgument
-            argument = ""
-            isEnabled = "YES">
-         </CommandLineArgument>
-      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

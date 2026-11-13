@@ -17,6 +17,7 @@ struct VoiceAddFoodView: View {
 
     @StateObject private var voiceService = VoiceRecognitionService.shared
     @ObservedObject private var aiConsent = AIDataConsentManager.shared
+    @ObservedObject private var authManager = AuthManager.shared
 
     var preselectedMeal: MealType? = nil
     var initialOpenCamera: Bool = false
@@ -53,7 +54,7 @@ struct VoiceAddFoodView: View {
                     mainContent
                 }
             }
-            .navigationTitle("Adicionar Refeição")
+            .navigationTitle(authManager.isPro ? "Adicionar Refeição" : "Adicionar Alimento")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -143,20 +144,30 @@ struct VoiceAddFoodView: View {
                 voiceService.errorMessage = nil
                 let defaultMeal = preselectedMeal ?? AIFoodParserService.shared.inferPrimaryMealType()
                 voiceService.updateMealType(defaultMeal)
-                if initialOpenCamera {
-                    voiceService.stopListening(shouldAnalyze: false)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        runWithAIConsent {
-                            showCameraSheet = true
+                if authManager.isPro {
+                    if !aiConsent.hasGrantedConsent {
+                        aiConsent.setConsent(true)
+                    }
+                    if initialOpenCamera {
+                        voiceService.stopListening(shouldAnalyze: false)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            if authManager.isPro {
+                                showCameraSheet = true
+                            }
                         }
+                    } else {
+                        startVoiceFlow()
                     }
                 } else {
-                    startVoiceFlow()
+                    voiceService.cutAllAIFlowsForFreeTier()
                 }
             }
             .onDisappear {
                 voiceService.stopListening(shouldAnalyze: false)
                 textDebounceTask?.cancel()
+            }
+            .onChange(of: authManager.accountTier) { _, newTier in
+                handleAccountTierChange(newTier)
             }
             .onChange(of: voiceService.recognizedText) { _, newText in
                 if !newText.isEmpty && voiceService.isRecording {
@@ -173,7 +184,11 @@ struct VoiceAddFoodView: View {
                        !trimmed.isEmpty,
                        !voiceService.isIncompleteFragment(trimmed),
                        !voiceService.hasDanglingConnectorOrNumber(trimmed) {
-                        voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: true)
+                        voiceService.analyzeIntent(
+                            from: trimmed,
+                            forceAI: authManager.isPro,
+                            allowCloudAI: authManager.isPro
+                        )
                     }
                 }
             }
@@ -200,12 +215,17 @@ struct VoiceAddFoodView: View {
     private var mainContent: some View {
         ScrollView {
             VStack(spacing: FormaTheme.Spacing.sectionGap) {
-                inputCard
+                if authManager.isPro {
+                    inputCard
+                } else {
+                    essentialInputCard
+                }
 
                 if let intent = voiceService.currentIntent, !intent.items.isEmpty {
                     FoodPlateResultCard(
                         intent: intent,
                         isAnalyzing: voiceService.isAnalyzing,
+                        isPro: authManager.isPro,
                         onUpdateMealType: { meal in
                             voiceService.updateMealType(meal)
                         },
@@ -255,18 +275,40 @@ struct VoiceAddFoodView: View {
         .withDoneKeyboardToolbar()
     }
 
+    private var hasInterpretedItems: Bool {
+        !(voiceService.currentIntent?.items.isEmpty ?? true)
+    }
+
+    private var headerStatusTitle: String {
+        if voiceService.isRecording {
+            return "Ouvindo por voz..."
+        }
+        if hasInterpretedItems {
+            return "Refeição interpretada via IA"
+        }
+        return selectedImage != nil ? "Foto da refeição" : "O que você comeu?"
+    }
+
     private var inputCard: some View {
         FormaCard(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    Text(
-                        voiceService.isRecording
-                            ? "Ouvindo você..."
-                            : (selectedImage != nil ? "Foto da refeição" : "O que você comeu?")
-                    )
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(voiceService.isRecording ? FormaTheme.Colors.brand : .secondary)
-                    .lineLimit(1)
+                    if voiceService.isRecording {
+                        Circle()
+                            .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
+                            .frame(width: 8, height: 8)
+                            .shadow(color: Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.85), radius: 5)
+                    } else if hasInterpretedItems {
+                        Circle()
+                            .fill(Color(red: 0.20, green: 0.86, blue: 0.52))
+                            .frame(width: 8, height: 8)
+                            .shadow(color: Color(red: 0.20, green: 0.86, blue: 0.52).opacity(0.85), radius: 5)
+                    }
+
+                    Text(headerStatusTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle((voiceService.isRecording || hasInterpretedItems) ? FormaTheme.Colors.primaryText : .secondary)
+                        .lineLimit(1)
 
                     Spacer(minLength: 6)
 
@@ -381,6 +423,14 @@ struct VoiceAddFoodView: View {
                     }
                 }
 
+                if selectedImage == nil {
+                    FormaVoiceWaveformView(voiceService: voiceService)
+                        .onTapGesture {
+                            toggleRecording()
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+
                 HStack(alignment: .top, spacing: 10) {
                     TextField(
                         selectedImage != nil
@@ -395,7 +445,7 @@ struct VoiceAddFoodView: View {
                     .focused($isFieldFocused)
                     .submitLabel(.done)
                     .onSubmit {
-                        triggerManualAIAnalysis(forceAI: false)
+                        triggerManualAIAnalysis(forceAI: true)
                     }
                     .onChange(of: inputText) { _, newValue in
                         handleTextChange(newValue)
@@ -485,13 +535,161 @@ struct VoiceAddFoodView: View {
         .buttonStyle(.plain)
     }
 
-    private func runWithAIConsent(_ action: @escaping () -> Void) {
-        if aiConsent.hasGrantedConsent {
-            action()
-        } else {
-            pendingAIConsentAction = action
-            showAIConsentSheet = true
+    private var essentialInputCard: some View {
+        FormaCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    if hasInterpretedItems {
+                        Circle()
+                            .fill(FormaTheme.Colors.energyGreen)
+                            .frame(width: 8, height: 8)
+                    } else {
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(FormaTheme.Colors.tacoCyan)
+                    }
+
+                    Text(hasInterpretedItems ? "Alimentos calculados • Tabela TACO" : "Busca Direta • Tabela TACO")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FormaTheme.Colors.primaryText)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 6)
+
+                    if !inputText.isEmpty {
+                        Button {
+                            inputText = ""
+                            voiceService.currentIntent = nil
+                            voiceService.recognizedText = ""
+                            voiceService.errorMessage = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if voiceService.currentIntent?.items.isEmpty ?? true {
+                        MealTypeSelectMenu(selectedMeal: activeMealType) { meal in
+                            voiceService.updateMealType(meal)
+                        }
+                    }
+                }
+
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(FormaTheme.Colors.brand)
+
+                    TextField(
+                        "Ex: 150g arroz, 120g frango, 2 ovos...",
+                        text: $inputText,
+                        axis: .vertical
+                    )
+                    .lineLimit(1...4)
+                    .font(.system(size: 15))
+                    .foregroundStyle(FormaTheme.Colors.primaryText)
+                    .focused($isFieldFocused)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        triggerManualAIAnalysis(forceAI: false)
+                    }
+                    .onChange(of: inputText) { _, newValue in
+                        handleTextChange(newValue)
+                    }
+                }
+                .padding(14)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.8)
+                )
+
+                if let errorMsg = voiceService.errorMessage, !errorMsg.isEmpty {
+                    FormaBanner(
+                        message: errorMsg,
+                        style: .error,
+                        retryTitle: "Tentar novamente",
+                        onRetry: !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? { triggerManualAIAnalysis(forceAI: false) }
+                            : nil
+                    )
+                }
+
+                if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        triggerManualAIAnalysis(forceAI: false)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "equal.circle.fill")
+                                .font(.system(size: 14, weight: .bold))
+                            Text("Calcular pela Tabela TACO")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(FormaTheme.Colors.brand)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text("Digite os alimentos e porções para calcular calorias e macros na base oficial TACO.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private func handleAccountTierChange(_ newTier: AccountTier) {
+        textDebounceTask?.cancel()
+        if newTier == .pro {
+            if !aiConsent.hasGrantedConsent {
+                aiConsent.setConsent(true)
+            }
+            showAIConsentSheet = false
+            pendingAIConsentAction = nil
+            voiceService.errorMessage = nil
+
+            let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let imgData = selectedImageData {
+                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
+            } else if !trimmed.isEmpty {
+                voiceService.analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
+            } else if !showCameraSheet && !isFieldFocused {
+                startVoiceFlow()
+            }
+        } else {
+            isFieldFocused = false
+            showCameraSheet = false
+            showAIConsentSheet = false
+            pendingAIConsentAction = nil
+            selectedImage = nil
+            selectedImageData = nil
+            selectedPhotoPickerItem = nil
+            voiceService.cutAllAIFlowsForFreeTier()
+
+            let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: false)
+            }
+        }
+    }
+
+    private func runWithAIConsent(_ action: @escaping () -> Void) {
+        guard authManager.isPro else { return }
+        if !aiConsent.hasGrantedConsent {
+            aiConsent.setConsent(true)
+        }
+        action()
     }
 
     private func triggerManualAIAnalysis(forceAI: Bool) {
@@ -500,26 +698,33 @@ struct VoiceAddFoodView: View {
         voiceService.stopListening(shouldAnalyze: false)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
+        if !authManager.isPro {
+            let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: false)
+            return
+        }
+
+        if !aiConsent.hasGrantedConsent {
+            aiConsent.setConsent(true)
+        }
+
         if let imgData = selectedImageData {
-            runWithAIConsent {
-                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
-            }
+            voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
         } else {
             let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
             let fallback = voiceService.currentIntent?.rawText ?? ""
             let query = !trimmed.isEmpty ? trimmed : fallback
             guard !query.isEmpty else { return }
-            if forceAI {
-                runWithAIConsent {
-                    voiceService.analyzeIntent(from: query, forceAI: true, allowCloudAI: true)
-                }
-            } else {
-                voiceService.analyzeIntent(from: query, forceAI: false, allowCloudAI: aiConsent.hasGrantedConsent)
-            }
+            voiceService.analyzeIntent(from: query, forceAI: true, allowCloudAI: true)
         }
     }
 
     private func handlePickedUIImage(_ image: UIImage) {
+        guard authManager.isPro else {
+            clearSelectedPhoto()
+            return
+        }
         textDebounceTask?.cancel()
         isFieldFocused = false
         voiceService.stopListening(shouldAnalyze: false)
@@ -531,9 +736,10 @@ struct VoiceAddFoodView: View {
 
         selectedImage = image
         selectedImageData = compressed
-        runWithAIConsent {
-            voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
+        if !aiConsent.hasGrantedConsent {
+            aiConsent.setConsent(true)
         }
+        voiceService.analyzePhoto(imageData: compressed, hintText: inputText)
     }
 
     private func clearSelectedPhoto() {
@@ -545,7 +751,11 @@ struct VoiceAddFoodView: View {
         if trimmed.isEmpty {
             voiceService.currentIntent = nil
         } else {
-            voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: true)
+            voiceService.analyzeIntent(
+                from: trimmed,
+                forceAI: authManager.isPro,
+                allowCloudAI: authManager.isPro
+            )
         }
     }
 
@@ -554,21 +764,37 @@ struct VoiceAddFoodView: View {
         guard selectedImageData == nil else { return }
 
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            if !voiceService.isRecording {
+                voiceService.currentIntent = nil
+            }
+            return
+        }
 
-        if !voiceService.isRecording {
+        guard !voiceService.isRecording else { return }
+
+        if authManager.isPro {
             textDebounceTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 450_000_000)
-                guard !Task.isCancelled else { return }
+                try? await Task.sleep(nanoseconds: 850_000_000)
+                guard !Task.isCancelled, authManager.isPro, !voiceService.isRecording else { return }
+                guard !voiceService.isIncompleteFragment(trimmed),
+                      !voiceService.hasDanglingConnectorOrNumber(trimmed) else { return }
+                voiceService.analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
+            }
+        } else {
+            textDebounceTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled, !authManager.isPro else { return }
                 voiceService.analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: false)
             }
         }
     }
 
     private func startVoiceFlow() {
+        guard authManager.isPro else { return }
         Task {
             let authorized = await voiceService.requestPermissions()
-            if authorized && selectedImage == nil && !showCameraSheet {
+            if authorized && authManager.isPro && selectedImage == nil && !showCameraSheet {
                 voiceService.startListening()
             }
         }
@@ -576,12 +802,14 @@ struct VoiceAddFoodView: View {
 
     private func toggleRecording() {
         textDebounceTask?.cancel()
+        guard authManager.isPro else {
+            voiceService.cutAllAIFlowsForFreeTier()
+            return
+        }
         if voiceService.isRecording {
             voiceService.stopListening(shouldAnalyze: selectedImageData == nil)
             if let imgData = selectedImageData {
-                runWithAIConsent {
-                    voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
-                }
+                voiceService.analyzePhoto(imageData: imgData, hintText: inputText)
             }
         } else {
             isFieldFocused = false

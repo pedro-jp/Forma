@@ -9,6 +9,7 @@ import Foundation
 import Speech
 import AVFoundation
 import Combine
+import SwiftUI
 
 /// Item individual do prato de voz
 public struct VoicePlateItem: Identifiable, Sendable, Equatable {
@@ -193,6 +194,7 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
     @Published public var isRecording: Bool = false
     @Published public var recognizedText: String = ""
     @Published public var audioLevel: Float = 0.0 // 0.0 a 1.0 para visualizador de ondas
+    @Published public var audioSpectrum: [Float] = Array(repeating: 0.06, count: 28) // 28 barras reativas à voz em tempo real
     @Published public var permissionStatus: VoicePermissionStatus = .notDetermined
     @Published public var listeningMode: VoiceListeningMode = .food
     @Published public var currentIntent: VoiceFoodIntent? = nil
@@ -291,6 +293,7 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         alternativeMatches = []
         lastAnalyzedSignature = ""
         audioLevel = 0.0
+        audioSpectrum = Array(repeating: 0.06, count: 28)
         
         let audioSession = AVAudioSession.sharedInstance()
         do {
@@ -316,9 +319,24 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
             on: inputNode,
             format: recordingFormat,
             request: request
-        ) { [weak self] level in
+        ) { [weak self] targetLevel, spectrum in
             Task { @MainActor [weak self] in
-                self?.audioLevel = level
+                guard let self = self, self.isRecording else { return }
+                self.audioLevel = targetLevel > self.audioLevel
+                    ? (self.audioLevel * 0.20 + targetLevel * 0.80)
+                    : (self.audioLevel * 0.55 + targetLevel * 0.45)
+                if self.audioSpectrum.count == spectrum.count {
+                    for idx in 0..<spectrum.count {
+                        let prev = self.audioSpectrum[idx]
+                        let target = spectrum[idx]
+                        // Ataque rápido ao falar (~30pt na voz normal) e decaimento suave no silêncio
+                        self.audioSpectrum[idx] = target > prev
+                            ? (prev * 0.18 + target * 0.82)
+                            : (prev * 0.58 + target * 0.42)
+                    }
+                } else {
+                    self.audioSpectrum = spectrum
+                }
             }
         }
         
@@ -391,13 +409,38 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         
         isRecording = false
         audioLevel = 0.0
+        audioSpectrum = Array(repeating: 0.06, count: 28)
         
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         
-        if shouldAnalyze && wasRecording && listeningMode == .food {
+        if shouldAnalyze && wasRecording && listeningMode == .food && AuthManager.shared.isPro {
             let trimmed = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty && !isIncompleteFragment(trimmed) {
-                analyzeIntent(from: trimmed, forceAI: false, allowCloudAI: true)
+                analyzeIntent(from: trimmed, forceAI: true, allowCloudAI: true)
+            }
+        }
+    }
+
+    public func cutAllAIFlowsForFreeTier() {
+        stopListening(shouldAnalyze: false)
+        activeAnalysisTask?.cancel()
+        activeAnalysisTask = nil
+        parseDebounceTask?.cancel()
+        parseDebounceTask = nil
+        silenceDetectionTask?.cancel()
+        silenceDetectionTask = nil
+        currentAnalysisId += 1
+        isAnalyzing = false
+        analysisPhase = .idle
+        errorMessage = nil
+        lastAnalyzedSignature = ""
+
+        if let existing = currentIntent {
+            let hasPhotoItems = existing.items.contains { $0.source.lowercased().contains("foto") }
+            let raw = existing.rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            currentIntent = nil
+            if !hasPhotoItems && !raw.isEmpty && !isIncompleteFragment(raw) {
+                analyzeIntent(from: raw, forceAI: false, allowCloudAI: false)
             }
         }
     }
@@ -470,27 +513,27 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
     public func analyzeIntent(from spokenText: String, forceAI: Bool = false, allowCloudAI: Bool = true) {
         let trimmed = spokenText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        let isProActive = AuthManager.shared.isPro
+        let effectiveCloudAI = isProActive && (allowCloudAI || forceAI)
+        let effectiveForceAI = isProActive && (forceAI || allowCloudAI)
         
-        if !forceAI {
-            let cleanQuery = extractFoodQuery(from: trimmed)
-            
-            // Se a fala contém apenas quantidade/medida (ex: "100g", "200 gramas"):
-            if cleanQuery.isEmpty || isPureMeasureQuery(cleanQuery) {
-                let portion = extractPortionGrams(from: trimmed)
-                if let first = currentIntent?.items.first {
-                    updateItemPortion(id: first.id, newPortion: portion)
-                }
-                return
-            }
-            
-            // Se não há alimento válido (apenas numeral como "Cento e"), nunca dispara IA
-            if isIncompleteFragment(trimmed) {
-                return
-            }
+        let cleanQuery = extractFoodQuery(from: trimmed)
+        
+        // Se a fala contém apenas quantidade/medida (ex: "100g", "200 gramas"):
+        if (cleanQuery.isEmpty || isPureMeasureQuery(cleanQuery)), let first = currentIntent?.items.first {
+            let portion = extractPortionGrams(from: trimmed)
+            updateItemPortion(id: first.id, newPortion: portion)
+            return
+        }
+        
+        // Se não há alimento válido (apenas numeral como "Cento e"), nunca dispara análise
+        if isIncompleteFragment(trimmed) {
+            return
         }
         
         // Deduplicação contra chamadas idênticas consecutivas
-        let signature = "\(trimmed.lowercased())|force:\(forceAI)|cloud:\(allowCloudAI)"
+        let signature = "\(trimmed.lowercased())|force:\(effectiveForceAI)|cloud:\(effectiveCloudAI)"
         if signature == lastAnalyzedSignature && (isAnalyzing || currentIntent?.rawText.lowercased() == trimmed.lowercased()) {
             return
         }
@@ -500,22 +543,22 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         currentAnalysisId += 1
         let analysisId = currentAnalysisId
         activeAnalysisTask?.cancel()
+        errorMessage = nil
         
-        if allowCloudAI || forceAI {
+        if effectiveCloudAI || effectiveForceAI {
             isAnalyzing = true
-            analysisPhase = forceAI ? .artificialIntelligence : .tacoDatabase
+            analysisPhase = .artificialIntelligence
         }
         
         activeAnalysisTask = Task { [weak self] in
-            // Aciona o parser nutricional com transição suave entre a base TACO e IA (somente usa nuvem quando permitido)
             let parseResult = await AIFoodParserService.shared.parseMeal(
                 description: trimmed,
-                forceAI: forceAI,
-                allowCloudAI: allowCloudAI,
+                forceAI: effectiveForceAI,
+                allowCloudAI: effectiveCloudAI,
                 onPhaseChange: { [weak self] newPhase in
                     Task { @MainActor [weak self] in
                         guard let strongSelf = self, strongSelf.currentAnalysisId == analysisId else { return }
-                        if allowCloudAI || forceAI {
+                        if effectiveCloudAI || effectiveForceAI {
                             strongSelf.analysisPhase = newPhase
                         }
                     }
@@ -526,6 +569,11 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
             
             await MainActor.run { [weak self] in
                 guard let self, self.currentAnalysisId == analysisId else { return }
+                if (effectiveCloudAI || effectiveForceAI) && !AuthManager.shared.isPro {
+                    self.isAnalyzing = false
+                    self.analysisPhase = .idle
+                    return
+                }
                 self.isAnalyzing = false
                 self.analysisPhase = .idle
                 
@@ -549,7 +597,8 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
                 self.currentIntent = VoiceFoodIntent(
                     rawText: trimmed,
                     mealType: preservedMealType ?? self.preferredMealType ?? parseResult.mealType,
-                    items: plateItems
+                    items: plateItems,
+                    aiSummary: (effectiveCloudAI || effectiveForceAI) ? parseResult.aiSummary : ""
                 )
             }
         }
@@ -557,6 +606,10 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
     
     /// Analisa foto da refeição via Gemini Vision e preenche os itens ajustáveis do prato
     public func analyzePhoto(imageData: Data, hintText: String = "") {
+        guard AuthManager.shared.isPro else {
+            cutAllAIFlowsForFreeTier()
+            return
+        }
         stopListening(shouldAnalyze: false)
         activeAnalysisTask?.cancel()
         parseDebounceTask?.cancel()
@@ -580,7 +633,11 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
                 guard !Task.isCancelled else { return }
                 
                 await MainActor.run {
-                    guard self.currentAnalysisId == analysisId else { return }
+                    guard self.currentAnalysisId == analysisId, AuthManager.shared.isPro else {
+                        self.isAnalyzing = false
+                        self.analysisPhase = .idle
+                        return
+                    }
                     self.isAnalyzing = false
                     self.analysisPhase = .idle
                     
@@ -900,8 +957,9 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         on inputNode: AVAudioInputNode,
         format: AVAudioFormat,
         request: SFSpeechAudioBufferRecognitionRequest,
-        onLevelUpdate: @escaping @Sendable (Float) -> Void
+        onLevelUpdate: @escaping @Sendable (Float, [Float]) -> Void
     ) {
+        let barCount = 28
         let tapBlock: AVAudioNodeTapBlock = { buffer, _ in
             request.append(buffer)
 
@@ -915,8 +973,31 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
                 sum += sample * sample
             }
             let rms = sqrt(sum / Float(frameLength))
-            let level = min(max(rms * 10.0, 0.05), 1.0)
-            onLevelUpdate(level)
+            // Curva calibrada para o modo .measurement: voz normal conversacional atinge ~0.75-0.90 (~30pt nas barras)
+            let normalizedVoice = powf(min(max((rms - 0.0022) * 34.0, 0.0), 1.0), 0.52)
+            let level = min(max(normalizedVoice, 0.04), 1.0)
+
+            // Calcula a energia em 28 sub-janelas do buffer com perfil de onda centralizado
+            var bands = [Float](repeating: 0.05, count: barCount)
+            let chunkSize = max(1, frameLength / barCount)
+            for b in 0..<barCount {
+                let start = b * chunkSize
+                let end = min(frameLength, start + chunkSize)
+                var bandSum: Float = 0.0
+                if end > start {
+                    for j in start..<end {
+                        let s = channelData[j]
+                        bandSum += s * s
+                    }
+                    let bandRms = sqrt(bandSum / Float(end - start))
+                    let bandNorm = powf(min(max((bandRms - 0.002) * 38.0, 0.0), 1.0), 0.52)
+                    // Envelope senoidal suave para valorizar o centro e manter bordas orgânicas
+                    let pos = Float(b) / Float(barCount - 1)
+                    let envelope = 0.48 + 0.52 * sin(pos * .pi)
+                    bands[b] = min(1.0, max(0.05, bandNorm * envelope))
+                }
+            }
+            onLevelUpdate(level, bands)
         }
 
         if #available(iOS 27.0, *) {
@@ -924,5 +1005,125 @@ public final class VoiceRecognitionService: NSObject, ObservableObject {
         } else {
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: format, block: tapBlock)
         }
+    }
+}
+
+/// Visualizador de ondas sensíveis à voz em tempo real (28 cápsulas luminosas estilo IA Forma)
+@MainActor
+public struct FormaVoiceWaveformView: View {
+    @ObservedObject var voiceService: VoiceRecognitionService
+    private let barCount: Int = 28
+
+    public init(voiceService: VoiceRecognitionService = .shared) {
+        self.voiceService = voiceService
+    }
+
+    public var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !voiceService.isRecording)) { timeline in
+            let time = voiceService.isRecording ? timeline.date.timeIntervalSinceReferenceDate : 0.0
+            let activeLevel = voiceService.isRecording ? CGFloat(voiceService.audioLevel) : 0.0
+            let isSpeakingNow = voiceService.isRecording && activeLevel > 0.075
+
+            ZStack {
+                // Brilho atmosférico difuso atrás das ondas (violeta em repouso, violeta + verde-água ao falar)
+                Ellipse()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                (isSpeakingNow
+                                    ? Color(red: 0.44, green: 0.84, blue: 0.88)
+                                    : Color(red: 0.58, green: 0.47, blue: 1.0)
+                                ).opacity(isSpeakingNow ? 0.36 : 0.22),
+                                Color(red: 0.52, green: 0.40, blue: 0.98).opacity(0.10),
+                                Color.clear
+                            ],
+                            center: .center,
+                            startRadius: 4,
+                            endRadius: 165
+                        )
+                    )
+                    .frame(height: 44)
+                    .blur(radius: 8)
+
+                HStack(alignment: .center, spacing: 5.5) {
+                    ForEach(0..<barCount, id: \.self) { index in
+                        let barHeight = computeBarHeight(index: index, time: time, activeLevel: activeLevel)
+                        let normalized = min(1.0, max(0.0, (barHeight - 5.2) / 30.0))
+
+                        Capsule(style: .continuous)
+                            .fill(barGradient(normalized: normalized, isSpeakingNow: isSpeakingNow))
+                            .frame(width: 4.8, height: barHeight)
+                            .shadow(
+                                color: (normalized > 0.14
+                                    ? Color(red: 0.38, green: 0.90, blue: 0.82)
+                                    : Color(red: 0.62, green: 0.50, blue: 1.0)
+                                ).opacity(isSpeakingNow ? 0.55 : 0.30),
+                                radius: isSpeakingNow ? 4.5 : 2.5,
+                                x: 0,
+                                y: 0
+                            )
+                            .animation(.interpolatingSpring(stiffness: 270, damping: 18), value: barHeight)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private func barGradient(normalized: CGFloat, isSpeakingNow: Bool) -> LinearGradient {
+        if !isSpeakingNow || normalized <= 0.08 {
+            // Estado de silêncio / refeição interpretada: pontos violeta-lavanda luminosos
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.74, green: 0.66, blue: 1.0).opacity(0.88),
+                    Color(red: 0.58, green: 0.48, blue: 0.98).opacity(0.82)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        // Estado ativo falando: topo lilás -> meio ciano -> base verde-água luminoso
+        return LinearGradient(
+            colors: [
+                Color(red: 0.72, green: 0.56, blue: 1.0).opacity(0.88 + 0.12 * normalized),
+                Color(red: 0.46, green: 0.79, blue: 0.98).opacity(0.84 + 0.16 * normalized),
+                Color(red: 0.36, green: 0.92, blue: 0.80).opacity(0.82 + 0.18 * normalized)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func computeBarHeight(index: Int, time: TimeInterval, activeLevel: CGFloat) -> CGFloat {
+        guard voiceService.isRecording else {
+            return 5.2
+        }
+
+        let bandValue: CGFloat = index < voiceService.audioSpectrum.count
+            ? CGFloat(voiceService.audioSpectrum[index])
+            : activeLevel
+
+        let pos = Double(index) / Double(max(1, barCount - 1))
+        let centerEnvelope = CGFloat(0.42 + 0.58 * sin(pos * .pi))
+
+        // Onda viajante orgânica modulada pela voz real do microfone
+        let wave1 = CGFloat(sin(time * 8.5 + Double(index) * 0.55)) * 0.5 + 0.5
+        let wave2 = CGFloat(cos(time * 5.2 - Double(index) * 0.35)) * 0.5 + 0.5
+        let harmonicModulation = (wave1 * 0.65 + wave2 * 0.35)
+
+        let combinedEnergy = max(bandValue, activeLevel * centerEnvelope)
+
+        if combinedEnergy <= 0.075 {
+            // Silêncio aguardando fala: linha de pontos luminosos com micro-respiração suave
+            let idlePulse = CGFloat(sin(time * 3.0 + Double(index) * 0.3)) * 0.55
+            return max(4.8, 5.2 + idlePulse)
+        }
+
+        // Em voz normal (~0.75-0.85), as barras centrais oscilam na faixa de ~28-32pt (teto em 36pt)
+        let dynamicExcursion = combinedEnergy * (0.66 + 0.38 * harmonicModulation) * (0.48 + 0.52 * CGFloat(sin(pos * .pi)))
+        return min(36.0, max(5.2, 5.2 + dynamicExcursion * 32.0))
     }
 }
