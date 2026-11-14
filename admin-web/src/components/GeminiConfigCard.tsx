@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Cpu, Check, AlertCircle, RefreshCw, Send } from 'lucide-react';
+import { Key, Cpu, Check, AlertCircle, RefreshCw, Send, Zap } from 'lucide-react';
 import { GeminiModelItem } from '../types';
 
 interface GeminiConfigCardProps {
@@ -30,7 +30,7 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
     fetchModels();
   }, [currentModel]);
 
-  const fetchModels = async () => {
+  const fetchModels = async (showFeedback = false) => {
     setLoadingModels(true);
     try {
       const resp = await fetch('/api/admin/models', { credentials: 'include' });
@@ -41,21 +41,55 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
           if (data.currentModel) {
             setSelectedModel(data.currentModel);
           }
+          if (showFeedback) {
+            setMessage({ text: `Lista atualizada (${data.models.length} modelos disponíveis).`, isError: false });
+          }
+        } else if (showFeedback) {
+          setMessage({
+            text: hasValidKey
+              ? 'Nenhum modelo retornado pela Google no momento.'
+              : 'Salve uma chave Gemini API válida para carregar os modelos ao vivo.',
+            isError: !hasValidKey
+          });
         }
+      } else if (showFeedback) {
+        setMessage({ text: 'Não foi possível atualizar a lista de modelos.', isError: true });
       }
     } catch (err) {
       console.warn('Falha ao buscar modelos:', err);
+      if (showFeedback) {
+        setMessage({ text: 'Erro de conexão ao atualizar a lista de modelos.', isError: true });
+      }
     } finally {
       setLoadingModels(false);
     }
   };
 
-  const handleSave = async () => {
+  const pickCheapestModel = (models: GeminiModelItem[]): string => {
+    const candidates = models.filter((m) => {
+      const id = m.id.toLowerCase();
+      return !id.includes('tts') && !id.includes('audio') && !id.includes('image') && !id.includes('embedding');
+    });
+    if (candidates.length === 0) {
+      return 'gemini-3.1-flash-lite';
+    }
+    const costRank = (id: string): number => {
+      const lower = id.toLowerCase();
+      if (lower.includes('flash-lite')) return 1;
+      if (lower.includes('flash-8b')) return 2;
+      if (lower.includes('flash')) return 3;
+      return 4;
+    };
+    const sorted = [...candidates].sort((a, b) => costRank(a.id) - costRank(b.id));
+    return sorted[0].id;
+  };
+
+  const saveModelConfig = async (modelToSave: string) => {
     setSaving(true);
     setMessage(null);
 
     const payload: { model: string; apiKey?: string } = {
-      model: selectedModel
+      model: modelToSave
     };
     if (apiKeyInput.trim()) {
       payload.apiKey = apiKeyInput.trim();
@@ -75,7 +109,7 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
         setMessage({ text: data.message || 'Configuração salva com sucesso!', isError: false });
         setApiKeyInput('');
         onConfigSaved();
-        fetchModels();
+        fetchModels(false);
       } else {
         setMessage({ text: data.error || 'Erro ao salvar configuração.', isError: true });
       }
@@ -84,6 +118,16 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    await saveModelConfig(selectedModel);
+  };
+
+  const handleUseCheapest = async () => {
+    const cheapest = pickCheapestModel(availableModels);
+    setSelectedModel(cheapest);
+    await saveModelConfig(cheapest);
   };
 
   const handleTest = async () => {
@@ -256,7 +300,7 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
               Modelo Gemini:
             </label>
             <button
-              onClick={fetchModels}
+              onClick={() => fetchModels(true)}
               disabled={loadingModels}
               style={{
                 background: 'none',
@@ -323,6 +367,26 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
         >
           <Check size={16} />
           <span>{saving ? 'Salvando...' : 'Salvar Configuração'}</span>
+        </button>
+
+        <button
+          onClick={handleUseCheapest}
+          disabled={saving}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 18px',
+            borderRadius: '12px',
+            backgroundColor: 'rgba(59, 130, 246, 0.16)',
+            color: '#93c5fd',
+            fontWeight: 700,
+            fontSize: '14px',
+            border: '1px solid rgba(59, 130, 246, 0.35)'
+          }}
+        >
+          <Zap size={16} />
+          <span>Usar Mais Barato</span>
         </button>
 
         <button
