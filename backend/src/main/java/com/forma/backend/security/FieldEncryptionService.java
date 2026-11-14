@@ -111,7 +111,8 @@ public class FieldEncryptionService {
             byte[] plain = cipher.doFinal(encrypted);
             return new String(plain, StandardCharsets.UTF_8);
         } catch (Exception e) {
-            throw new IllegalStateException("Falha ao descriptografar dado sensível em repouso.", e);
+            log.warn("[Security] Falha ao descriptografar dado em repouso (possível rotação de APP_ENCRYPTION_KEY); retornando vazio.");
+            return "";
         }
     }
 
