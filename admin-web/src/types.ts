@@ -102,8 +102,194 @@ export interface AdminOverview {
 }
 
 export interface WebSocketEvent<T = any> {
-  type: 'CONNECTED' | 'AI_REQUEST' | 'USER_ACTIVITY' | 'SYNC_ACTIVITY' | 'KILL_SWITCH_CHANGED' | 'CONFIG_UPDATED';
+  type:
+    | 'CONNECTED'
+    | 'AI_REQUEST'
+    | 'USER_ACTIVITY'
+    | 'SYNC_ACTIVITY'
+    | 'KILL_SWITCH_CHANGED'
+    | 'CONFIG_UPDATED'
+    | 'BILLING_UPDATED';
   timestamp: string;
   data?: T;
   message?: string;
+}
+
+export interface SubscriptionPlanItem {
+  id: string;
+  name: string;
+  description: string;
+  storekitProductId: string;
+  billingInterval: 'MONTHLY' | 'YEARLY' | string;
+  priceCents: number;
+  currency: string;
+  defaultTrialDays: number;
+  active: boolean;
+}
+
+export interface CouponItem {
+  id: string;
+  code: string;
+  description?: string | null;
+  couponType: 'FREE_PERIOD_DAYS' | 'PERCENT_DISCOUNT' | 'FIXED_CENTS_DISCOUNT' | string;
+  discountPercent?: number | null;
+  discountCents?: number | null;
+  freePeriodDays?: number | null;
+  applicablePlanId?: string | null;
+  maxRedemptions?: number | null;
+  currentRedemptions: number;
+  perUserLimit: number;
+  expiresAtUtc?: string | null;
+  active: boolean;
+  createdByAdmin?: string | null;
+  createdAtUtc?: string | null;
+}
+
+export interface CouponRedemptionItem {
+  id: string;
+  couponCode: string;
+  userId: string;
+  userEmail?: string | null;
+  benefitSummary: string;
+  redeemedAtUtc: string;
+}
+
+export interface DunningNoticeItem {
+  id: string;
+  subscriptionId: string;
+  userId: string;
+  userEmail?: string | null;
+  dayNumber: number;
+  noticeType: string;
+  title: string;
+  message: string;
+  websocketDelivered: boolean;
+  emailDelivered: boolean;
+  acknowledgedAtUtc?: string | null;
+  createdAtUtc: string;
+}
+
+export interface UserSubscriptionItem {
+  id?: string | null;
+  userId: string;
+  userEmail: string;
+  accountTier: 'FREE' | 'PRO' | string;
+  planId: string;
+  planName: string;
+  source: string;
+  status: 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED' | 'FREE' | string;
+  priceCents: number;
+  currency: string;
+  appliedCouponCode?: string | null;
+  autoRenew: boolean;
+  externalTransactionId?: string | null;
+  currentPeriodStartUtc?: string | null;
+  currentPeriodEndUtc?: string | null;
+  trialEndsAtUtc?: string | null;
+  overdueSinceUtc?: string | null;
+  graceEndsAtUtc?: string | null;
+  dunningWarningsSent: number;
+  lastWarningDaySent: number;
+  overdueActionEffective: 'PAUSE' | 'CANCEL' | string;
+  statusReason?: string | null;
+  pastDue: boolean;
+  overdueDay?: number | null;
+  activeWarningMessage?: string | null;
+  updatedAtUtc?: string | null;
+}
+
+export interface PaymentEntryItem {
+  id: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  subscriptionId?: string | null;
+  entryType: string;
+  status: 'PAID' | 'PENDING' | 'OVERDUE' | 'REFUNDED' | 'CANCELED' | string;
+  grossAmountCents: number;
+  discountCents: number;
+  netAmountCents: number;
+  currency: string;
+  paymentMethod: string;
+  couponCode?: string | null;
+  referenceCode?: string | null;
+  description: string;
+  paidAtUtc?: string | null;
+  dueAtUtc?: string | null;
+  createdBy?: string | null;
+  createdAtUtc: string;
+}
+
+export interface WebhookEventItem {
+  id: string;
+  eventId: string;
+  provider: string;
+  eventType: string;
+  signatureValid: boolean;
+  processingStatus: string;
+  targetUserEmail?: string | null;
+  payloadExcerpt?: string | null;
+  errorMessage?: string | null;
+  receivedAtUtc: string;
+}
+
+export interface WebhookConfigItem {
+  endpointPath: string;
+  signatureHeader: string;
+  maskedSecret: string;
+  rotatedPlaintextSecret?: string | null;
+}
+
+export interface DailyRevenuePoint {
+  dateIso: string;
+  label: string;
+  revenueCents: number;
+  entriesCount: number;
+}
+
+export interface BillingDashboardData {
+  mrrCents: number;
+  arrCents: number;
+  paidRevenue30dCents: number;
+  totalNetRevenueCents: number;
+  pendingRevenueCents: number;
+  refundedTotalCents: number;
+  activeSubscribersCount: number;
+  trialingCount: number;
+  pastDueDay1Count: number;
+  pastDueDay2Count: number;
+  pastDueDay3Count: number;
+  pausedCount: number;
+  canceledCount: number;
+  couponRedemptionsCount: number;
+  overdueActionPolicy: 'PAUSE' | 'CANCEL' | string;
+  graceDays: number;
+  dailyRevenueLast14Days: DailyRevenuePoint[];
+  plans: SubscriptionPlanItem[];
+  subscriptions: UserSubscriptionItem[];
+  coupons: CouponItem[];
+  recentRedemptions: CouponRedemptionItem[];
+  recentEntries: PaymentEntryItem[];
+  recentDunningNotices: DunningNoticeItem[];
+  recentWebhooks: WebhookEventItem[];
+  webhookConfig: WebhookConfigItem;
+}
+
+export interface AdminAuditItem {
+  id: string;
+  adminActor: string;
+  actionType: string;
+  targetRef?: string | null;
+  detailSummary?: string | null;
+  createdAtUtc: string;
+}
+
+export interface SecurityIncidentItem {
+  id: string;
+  severity: string;
+  incidentType: string;
+  affectedCategories?: string | null;
+  description: string;
+  mitigationActions?: string | null;
+  anpdNotified: boolean;
+  detectedAtUtc: string;
 }

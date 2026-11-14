@@ -6,6 +6,8 @@ import com.forma.backend.security.FieldEncryptionService;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.Set;
 
@@ -20,13 +22,17 @@ public class AppConfigService {
     public static final String KEY_APPLE_TEAM_ID = "APPLE_TEAM_ID";
     public static final String KEY_APPLE_KEY_ID = "APPLE_KEY_ID";
     public static final String KEY_APPLE_PRIVATE_KEY = "APPLE_PRIVATE_KEY";
+    public static final String KEY_WEBHOOK_SECRET = "WEBHOOK_SECRET";
+    public static final String KEY_BILLING_OVERDUE_ACTION = "BILLING_OVERDUE_ACTION";
     public static final String DEFAULT_APPLE_TEAM_ID = "Q42LJ4LG32";
     public static final String DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private static final Set<String> SECRET_CONFIG_KEYS = Set.of(
         KEY_GEMINI_API_KEY,
         KEY_RESEND_API_KEY,
-        KEY_APPLE_PRIVATE_KEY
+        KEY_APPLE_PRIVATE_KEY,
+        KEY_WEBHOOK_SECRET
     );
 
     private final AppConfigRepository appConfigRepository;
@@ -52,6 +58,14 @@ public class AppConfigService {
         }
         migrateSecretIfPlaintext(KEY_RESEND_API_KEY);
         migrateSecretIfPlaintext(KEY_APPLE_PRIVATE_KEY);
+        migrateSecretIfPlaintext(KEY_WEBHOOK_SECRET);
+
+        if (getWebhookSecret().isBlank()) {
+            rotateWebhookSecret();
+        }
+        if (!appConfigRepository.existsById(KEY_BILLING_OVERDUE_ACTION)) {
+            appConfigRepository.save(new AppConfigEntity(KEY_BILLING_OVERDUE_ACTION, "PAUSE", "Ação automática após 3 dias de atraso (PAUSE ou CANCEL)"));
+        }
 
         Optional<AppConfigEntity> modelEntity = appConfigRepository.findById(KEY_GEMINI_MODEL);
         if (modelEntity.isEmpty()) {
@@ -158,6 +172,49 @@ public class AppConfigService {
 
     public String getApplePrivateKeyPem() {
         return getConfigOrEnv(KEY_APPLE_PRIVATE_KEY, "");
+    }
+
+    public String getWebhookSecret() {
+        String env = System.getenv("APP_WEBHOOK_SECRET");
+        if (env != null && !env.isBlank()) {
+            return env.trim();
+        }
+        return readDecryptedDbValue(KEY_WEBHOOK_SECRET);
+    }
+
+    public String getMaskedWebhookSecret() {
+        String sec = getWebhookSecret();
+        if (sec.isBlank()) return "Não configurado";
+        if (sec.length() <= 12) return "whsec_********";
+        return sec.substring(0, 10) + "..." + sec.substring(sec.length() - 4);
+    }
+
+    public String rotateWebhookSecret() {
+        byte[] bytes = new byte[24];
+        SECURE_RANDOM.nextBytes(bytes);
+        String nextSecret = "whsec_" + HexFormat.of().formatHex(bytes);
+        AppConfigEntity e = appConfigRepository.findById(KEY_WEBHOOK_SECRET)
+            .orElse(new AppConfigEntity(KEY_WEBHOOK_SECRET, "", "Segredo HMAC-SHA256 dos Webhooks de Cobrança"));
+        e.setConfigValue(encryptionService.encrypt(nextSecret));
+        appConfigRepository.saveAndFlush(e);
+        return nextSecret;
+    }
+
+    public String getBillingOverdueAction() {
+        String val = appConfigRepository.findById(KEY_BILLING_OVERDUE_ACTION)
+            .map(AppConfigEntity::getConfigValue)
+            .orElse("PAUSE")
+            .trim()
+            .toUpperCase();
+        return "CANCEL".equals(val) ? "CANCEL" : "PAUSE";
+    }
+
+    public void setBillingOverdueAction(String action) {
+        String normalized = (action != null && "CANCEL".equalsIgnoreCase(action.trim())) ? "CANCEL" : "PAUSE";
+        AppConfigEntity e = appConfigRepository.findById(KEY_BILLING_OVERDUE_ACTION)
+            .orElse(new AppConfigEntity(KEY_BILLING_OVERDUE_ACTION, "PAUSE", "Ação automática após 3 dias de atraso (PAUSE ou CANCEL)"));
+        e.setConfigValue(normalized);
+        appConfigRepository.saveAndFlush(e);
     }
 
     public void setAppleAuthConfig(String teamId, String keyId, String privateKeyPem) {

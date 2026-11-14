@@ -135,11 +135,35 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
     }
 
     public void sendAccountStateToUser(User user, String eventName) {
+        sendSubscriptionStateToUser(user, eventName, null, null, null, null);
+    }
+
+    public void sendSubscriptionStateToUser(
+        User user,
+        String eventName,
+        String subscriptionStatus,
+        Integer overdueDay,
+        String graceEndsAtUtc,
+        String warningMessage
+    ) {
         if (user == null || user.getId() == null) return;
         Set<WebSocketSession> sessions = sessionsByUserId.get(user.getId());
         if (sessions == null || sessions.isEmpty()) return;
 
         Map<String, Object> payload = buildStatePayload(user, eventName);
+        if (subscriptionStatus != null && !subscriptionStatus.isBlank()) {
+            payload.put("subscriptionStatus", subscriptionStatus);
+        }
+        if (overdueDay != null) {
+            payload.put("overdueDay", overdueDay);
+        }
+        if (graceEndsAtUtc != null && !graceEndsAtUtc.isBlank()) {
+            payload.put("graceEndsAtUtc", graceEndsAtUtc);
+        }
+        if (warningMessage != null && !warningMessage.isBlank()) {
+            payload.put("warningMessage", warningMessage);
+        }
+
         String json;
         try {
             json = objectMapper.writeValueAsString(payload);

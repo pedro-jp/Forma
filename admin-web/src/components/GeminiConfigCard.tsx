@@ -68,7 +68,12 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
   const pickCheapestModel = (models: GeminiModelItem[]): string => {
     const candidates = models.filter((m) => {
       const id = m.id.toLowerCase();
-      return !id.includes('tts') && !id.includes('audio') && !id.includes('image') && !id.includes('embedding');
+      return !id.includes('tts')
+        && !id.includes('audio')
+        && !id.includes('image')
+        && !id.includes('embedding')
+        && !id.includes('hydrogen')
+        && !id.includes('robotics');
     });
     if (candidates.length === 0) {
       return 'gemini-3.1-flash-lite';
@@ -281,7 +286,7 @@ export const GeminiConfigCard: React.FC<GeminiConfigCardProps> = ({
             type="password"
             value={apiKeyInput}
             onChange={(e) => setApiKeyInput(e.target.value)}
-            placeholder="Cole sua chave AIzaSy..."
+            placeholder="Cole sua chave AQ... ou AIzaSy..."
             style={{
               width: '100%',
               padding: '12px 14px',

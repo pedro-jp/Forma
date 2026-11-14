@@ -1,6 +1,7 @@
 package com.forma.backend.controller;
 
 import com.forma.backend.dto.AdminDto;
+import com.forma.backend.entity.SecurityIncidentLogEntity;
 import com.forma.backend.exception.DomainExceptions.InvalidCredentialsException;
 import com.forma.backend.repository.*;
 import com.forma.backend.security.AuthContextResolver;
@@ -21,14 +22,21 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -51,6 +59,7 @@ public class AdminController {
     private final String configuredAdminPassword;
     private final String configuredAdminKey;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final Map<String, Deque<Long>> failedAdminLoginsByIp = new ConcurrentHashMap<>();
 
     public AdminController(
         UserRepository userRepository,
@@ -94,6 +103,11 @@ public class AdminController {
         HttpServletRequest request,
         HttpServletResponse response
     ) {
+        String clientIp = extractClientIp(request);
+        if (isAdminIpLocked(clientIp)) {
+            throw new InvalidCredentialsException("Muitas tentativas inválidas consecutivas. Acesso bloqueado temporariamente por segurança (10 min).");
+        }
+
         String username = body != null ? body.get("username") : null;
         String password = body != null ? body.get("password") : null;
 
@@ -111,10 +125,12 @@ public class AdminController {
             || (hasAdminKey && authContextResolver.constantTimeSecretMatch(configuredAdminKey.trim(), password.trim()));
 
         if (!validUser || !validPass) {
+            recordFailedAdminAttempt(clientIp, username.trim(), request);
             mciAccessLogService.recordAdminAudit(username.trim(), "ADMIN_LOGIN_FAILED", (String) null, "Tentativa de login admin recusada", request);
             throw new InvalidCredentialsException("Usuário ou senha de administrador inválidos.");
         }
 
+        failedAdminLoginsByIp.remove(clientIp);
         mciAccessLogService.recordAdminAudit(configuredAdminUsername, "ADMIN_LOGIN_SUCCESS", (String) null, "Sessão administrativa autenticada", request);
         String adminToken = jwtService.generateAdminToken(username.trim());
         ResponseCookie cookie = ResponseCookie.from(AuthContextResolver.ADMIN_COOKIE_NAME, adminToken)
@@ -122,7 +138,7 @@ public class AdminController {
             .secure(isSecureRequest(request))
             .path("/")
             .maxAge(Duration.ofDays(7))
-            .sameSite("Lax")
+            .sameSite("Strict")
             .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
@@ -141,10 +157,60 @@ public class AdminController {
             .secure(isSecureRequest(request))
             .path("/")
             .maxAge(0)
-            .sameSite("Lax")
+            .sameSite("Strict")
             .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         return ResponseEntity.ok(Map.of("status", "logged_out", "message", "Sessão encerrada com sucesso"));
+    }
+
+    private boolean isAdminIpLocked(String clientIp) {
+        Deque<Long> attempts = failedAdminLoginsByIp.get(clientIp);
+        if (attempts == null) return false;
+        long cutoff = System.currentTimeMillis() - 600_000L;
+        synchronized (attempts) {
+            while (!attempts.isEmpty() && attempts.peekFirst() < cutoff) {
+                attempts.pollFirst();
+            }
+            return attempts.size() >= 5;
+        }
+    }
+
+    private void recordFailedAdminAttempt(String clientIp, String attemptedUser, HttpServletRequest request) {
+        long now = System.currentTimeMillis();
+        long cutoff = now - 600_000L;
+        Deque<Long> attempts = failedAdminLoginsByIp.computeIfAbsent(clientIp, k -> new ArrayDeque<>());
+        boolean triggeredLockout = false;
+        synchronized (attempts) {
+            while (!attempts.isEmpty() && attempts.peekFirst() < cutoff) {
+                attempts.pollFirst();
+            }
+            attempts.addLast(now);
+            triggeredLockout = attempts.size() == 5;
+        }
+        if (triggeredLockout) {
+            try {
+                SecurityIncidentLogEntity inc = new SecurityIncidentLogEntity();
+                inc.setSeverity("MEDIUM");
+                inc.setIncidentType("ADMIN_BRUTE_FORCE_BLOCKED");
+                inc.setAffectedCategories("Credenciais Administrativas");
+                inc.setAffectedCount(0);
+                inc.setDescription("Bloqueio automático após 5 tentativas inválidas de login admin (usuário informado: " + attemptedUser + ").");
+                inc.setMitigationActions("IP bloqueado por 10 minutos; trilha registrada em admin_audit_logs.");
+                inc.setDetectedAtUtc(Instant.now());
+                inc.setRetainUntilUtc(Instant.now().plus(1825, ChronoUnit.DAYS));
+                securityIncidentLogRepository.save(inc);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private String extractClientIp(HttpServletRequest request) {
+        if (request == null) return "unknown";
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].trim();
+        }
+        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
     }
 
     private boolean isSecureRequest(HttpServletRequest request) {
@@ -277,33 +343,47 @@ public class AdminController {
             : appConfigService.getGeminiModel();
 
         try {
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
-            String pingBody = "{\"contents\":[{\"parts\":[{\"text\":\"ping\"}]}]}";
+            String pingBody = "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"ping\"}]}],\"generationConfig\":{\"maxOutputTokens\":8,\"temperature\":0.0}}";
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("x-goog-api-key", keyToTest)
-                .POST(HttpRequest.BodyPublishers.ofString(pingBody))
-                .timeout(Duration.ofSeconds(20))
-                .build();
-
-            HttpResponse<String> resp = client.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return ResponseEntity.ok(Map.of(
-                    "status", "valid",
-                    "message", "✅ Chave Gemini válida e conectada com sucesso no modelo " + model + "!"
-                ));
+            boolean isVertexExpressKey = keyToTest.startsWith("AQ.");
+            List<String> urlsToTry = new ArrayList<>();
+            if (isVertexExpressKey) {
+                urlsToTry.add("https://aiplatform.googleapis.com/v1/publishers/google/models/" + model + ":generateContent?key=" + URLEncoder.encode(keyToTest, StandardCharsets.UTF_8));
             }
-            return ResponseEntity.status(resp.statusCode()).body(Map.of(
+            urlsToTry.add("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent");
+
+            HttpResponse<String> lastResp = null;
+            for (String url : urlsToTry) {
+                HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(pingBody))
+                    .timeout(Duration.ofSeconds(15));
+                if (!url.contains("aiplatform.googleapis.com")) {
+                    reqBuilder.header("x-goog-api-key", keyToTest);
+                }
+                HttpResponse<String> resp = client.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                lastResp = resp;
+                if (resp.statusCode() == 200) {
+                    return ResponseEntity.ok(Map.of(
+                        "status", "valid",
+                        "message", "✅ Chave Gemini válida e conectada com sucesso no modelo " + model + "!"
+                    ));
+                }
+                if (resp.statusCode() != 400 && resp.statusCode() != 401 && resp.statusCode() != 403 && resp.statusCode() != 404) {
+                    break;
+                }
+            }
+            int code = lastResp != null ? lastResp.statusCode() : 500;
+            return ResponseEntity.status(code).body(Map.of(
                 "status", "invalid",
-                "message", "Erro da API do Gemini (HTTP " + resp.statusCode() + ")"
+                "message", "Erro da API do Gemini (HTTP " + code + ")"
             ));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of(
                 "status", "error",
-                "message", "Erro de conexão: " + e.getMessage()
+                "message", "Erro de conexão: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())
             ));
         }
     }
@@ -551,6 +631,8 @@ public class AdminController {
         String lower = id.toLowerCase();
         return lower.contains("embedding")
             || lower.contains("aqa")
+            || lower.contains("hydrogen")
+            || lower.contains("robotics")
             || lower.startsWith("gemini-1.")
             || lower.startsWith("gemini-2.")
             || lower.equals("gemini-flash-lite-latest")

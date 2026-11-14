@@ -42,8 +42,9 @@ O **Forma** é um ecossistema completo de organização pessoal de nutrição, h
 ### 3.2 Criptografia em Trânsito, em Repouso e no Dispositivo
 - **AES-256-GCM em Repouso (`FieldEncryptionService` / `EncryptedStringAttributeConverter`):** Todos os valores sensíveis gravados no PostgreSQL recebem prefixo autenticado `ENC:v1:` com IV aleatório de 12 bytes e tag GCM de 128 bits:
   - `users.apple_refresh_token` e `users.google_refresh_token`
-  - `app_config` (`GEMINI_API_KEY`, `RESEND_API_KEY`, `APPLE_PRIVATE_KEY`)
+  - `app_config` (`GEMINI_API_KEY`, `RESEND_API_KEY`, `APPLE_PRIVATE_KEY`, `BILLING_WEBHOOK_SECRET`)
   - `mci_access_logs.ip_address_encrypted` e `admin_audit_logs.ip_address_encrypted`
+- **Hardening Administrativo:** Sessão por cookie `HttpOnly; SameSite=Strict; Secure`, proteção anti-CSRF (`Sec-Fetch-Site` e validação estrita de `Origin`) em rotas mutáveis, além de bloqueio automático de IP após 5 tentativas falhas (registrando `ADMIN_BRUTE_FORCE_BLOCKED`).
 - **Pseudonimização (`HMAC-SHA256`):** Referências de conta no Marco Civil (`account_ref_hash`) e registros de consentimento pós-exclusão (`anon:<48hex>`) utilizam HMAC-SHA256 irreversível sem chave.
 - **Proteção no iOS (`KeychainHelper` & Data Protection):** `KeychainHelper` usa `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` sem fallback para `UserDefaults`. Arquivos locais (`AppActivityLogManager`, `WidgetDataManager` e exportação JSON temporária) gravam com `.completeFileProtectionUnlessOpen`, e todo o estado local + App Group widget é limpo no `logout()` e troca de conta.
 - **Chave Gemini protegida:** Enviada exclusivamente pelo backend no cabeçalho HTTP `x-goog-api-key` (jamais em query string `?key=` nem no aplicativo iOS).
@@ -85,18 +86,35 @@ Todas as respostas web aplicam:
 
 ---
 
-## 5. Modelo de Dados (16 Tabelas PostgreSQL + Row-Level Security)
+## 5. Pagamentos, Assinaturas, Cupons, StoreKit 2 & Régua de Atraso (3 Dias)
+
+1. **Testes Locais StoreKit 2 sem Conta Apple Paga:**
+   - O projeto iOS inclui [`Forma/FormaProducts.storekit`](../Forma/FormaProducts.storekit) vinculado ao esquema [`Forma.xcscheme`](../Forma.xcodeproj/xcshareddata/xcschemes/Forma.xcscheme) (`jota.Forma.pro.monthly` e `jota.Forma.pro.yearly` com 7 dias de teste grátis), permitindo testar compras e restaurações localmente com Team pessoal gratuita.
+   - Em paralelo, o app e o Console Admin permitem ativação integral via **Cupons de Período Grátis** (`FREE_PERIOD_DAYS`) e descontos percentuais/fixos sem dependência da App Store.
+2. **Cupons & Entradas Financeiras:**
+   - Endpoints do app: `GET /api/subscriptions/plans`, `GET /api/subscriptions/me`, `POST /api/subscriptions/validate-coupon`, `POST /api/subscriptions/redeem-coupon`, `POST /api/subscriptions/sync-storekit` e `POST /api/subscriptions/acknowledge-warning`.
+   - O Console Admin controla entradas manuais (`PIX`, `CARD`, `MANUAL`, `COUPON`, `STOREKIT`, `WEBHOOK`), estornos, KPIs financeiros (MRR, ARR, receita líquida 30d) e exportação CSV.
+3. **Webhooks Assinados (`POST /api/webhooks/billing`):**
+   - Exige assinatura HMAC-SHA256 válida no header `X-Forma-Webhook-Signature` (`sha256=<hex>`), protege idempotência por `eventId` e audita tentativas válidas e recusadas em `billing_webhook_events`.
+4. **Régua Automatizada de Inadimplência (3 Dias):**
+   - Ao detectar pagamento em atraso (`PAYMENT_FAILED` via webhook ou expiração em `@Scheduled`), a assinatura entra em `PAST_DUE` e dispara **3 avisos diários consecutivos** (Dia 1, Dia 2 e Dia 3) via WebSocket `/ws/account` (banner nativo no iOS + toast em tempo real).
+   - Após completar 3 dias (72 horas) sem regularização, o motor executa automaticamente a política configurada no painel (**Pausar `PAUSED`** ou **Cancelar `CANCELED`**) e rebaixa o usuário para a camada `FREE`.
+
+---
+
+## 6. Modelo de Dados (23 Tabelas PostgreSQL + Row-Level Security)
 
 Consulte os DDLs completos em [`backend/supabase_schema.sql`](../backend/supabase_schema.sql) e [`backend/src/main/resources/schema.sql`](../backend/src/main/resources/schema.sql):
 
 - **Identidade & Segurança:** `users`, `deleted_accounts_tombstone`, `legal_consent_ledger`, `mci_access_logs`, `admin_audit_logs`, `security_incident_logs`, `app_config`
 - **Domínio de Saúde & Auditoria de Uso:** `user_profiles`, `food_entries`, `workout_entries`, `workout_routines`, `water_entries`, `weight_entries`, `ai_analyses`, `ai_request_logs`, `user_activity_logs`
+- **Faturamento, Assinaturas, Cupons & Webhooks:** `subscription_plans`, `coupons`, `coupon_redemptions`, `user_subscriptions`, `payment_entries`, `billing_webhook_events`, `dunning_notices`
 
-Todas as 16 tabelas possuem `ENABLE ROW LEVEL SECURITY`, políticas estritas de isolamento por `user_id` e revogação total das roles públicas `anon` e `authenticated`.
+Todas as 23 tabelas possuem `ENABLE ROW LEVEL SECURITY` / `FORCE ROW LEVEL SECURITY`, políticas estritas de isolamento por `user_id` e revogação total das roles públicas `anon` e `authenticated`.
 
 ---
 
-## 6. Variáveis de Ambiente de Produção & Comandos de Verificação
+## 7. Variáveis de Ambiente de Produção & Comandos de Verificação
 
 Consulte o template completo em [`backend/.env.example`](../backend/.env.example). Em produção (`Render`), configure obrigatoriamente:
 - `RENDER=true`, `APP_ALLOW_H2_FALLBACK=false`, `APP_ALLOW_DEV_SOCIAL_MOCK=false`

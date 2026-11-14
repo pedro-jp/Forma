@@ -17,9 +17,11 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import javax.imageio.ImageIO;
@@ -413,34 +415,49 @@ public class GeminiAiProxyService {
         String requestBody = buildGeminiPayload(prompt, imageBase64, imageMimeType);
         Exception lastException = null;
 
+        boolean isVertexExpressKey = apiKey.trim().startsWith("AQ.");
         for (String model : modelsToTry) {
-            try {
-                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .header("x-goog-api-key", apiKey)
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .timeout(Duration.ofSeconds(25))
-                    .build();
+            List<String> endpointUrls = new ArrayList<>();
+            if (isVertexExpressKey) {
+                endpointUrls.add("https://aiplatform.googleapis.com/v1/publishers/google/models/" + model
+                    + ":generateContent?key=" + URLEncoder.encode(apiKey.trim(), StandardCharsets.UTF_8));
+            }
+            endpointUrls.add("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent");
 
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 200) {
-                    String extracted = extractResponseText(response.body());
-                    if (extracted != null && !extracted.isBlank()) {
-                        return extracted;
+            for (String url : endpointUrls) {
+                try {
+                    HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .timeout(Duration.ofSeconds(25));
+                    if (!url.contains("aiplatform.googleapis.com")) {
+                        reqBuilder.header("x-goog-api-key", apiKey.trim());
                     }
-                }
 
-                if (isRetryableUpstreamStatus(response.statusCode())) {
-                    lastException = new RuntimeException("Gemini (" + model + " - HTTP " + response.statusCode() + "): " + response.body());
-                    continue;
-                }
+                    HttpResponse<String> response = httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
 
-                throw new RuntimeException("Gemini (" + model + " - HTTP " + response.statusCode() + "): " + response.body());
-            } catch (Exception e) {
-                lastException = e;
+                    if (response.statusCode() == 200) {
+                        String extracted = extractResponseText(response.body());
+                        if (extracted != null && !extracted.isBlank()) {
+                            return extracted;
+                        }
+                    }
+
+                    if (isRetryableUpstreamStatus(response.statusCode())) {
+                        lastException = new RuntimeException("Gemini (" + model + " - HTTP " + response.statusCode() + "): " + response.body());
+                        continue;
+                    }
+
+                    if (url.contains("aiplatform.googleapis.com")) {
+                        lastException = new RuntimeException("Vertex (" + model + " - HTTP " + response.statusCode() + ")");
+                        continue;
+                    }
+
+                    throw new RuntimeException("Gemini (" + model + " - HTTP " + response.statusCode() + "): " + response.body());
+                } catch (Exception e) {
+                    lastException = e;
+                }
             }
         }
 

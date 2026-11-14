@@ -40,6 +40,15 @@ public class AdminUserService {
     private final DeletedAccountTombstoneRepository deletedAccountTombstoneRepository;
     private final FieldEncryptionService fieldEncryptionService;
 
+    @Autowired(required = false)
+    private UserSubscriptionRepository userSubscriptionRepository;
+
+    @Autowired(required = false)
+    private DunningNoticeRepository dunningNoticeRepository;
+
+    @Autowired(required = false)
+    private CouponRedemptionRepository couponRedemptionRepository;
+
     @Autowired
     public AdminUserService(
         UserRepository userRepository,
@@ -342,6 +351,15 @@ public class AdminUserService {
         aiAnalysisRepository.deleteByUserId(userId);
         userActivityLogRepository.deleteByUserId(userId);
         aiRequestLogRepository.deleteByUserId(userId);
+        if (dunningNoticeRepository != null) {
+            dunningNoticeRepository.deleteByUserId(userId);
+        }
+        if (couponRedemptionRepository != null) {
+            couponRedemptionRepository.deleteByUserId(userId);
+        }
+        if (userSubscriptionRepository != null) {
+            userSubscriptionRepository.deleteByUserId(userId);
+        }
         userProfileRepository.deleteById(userId);
         userRepository.delete(user);
 

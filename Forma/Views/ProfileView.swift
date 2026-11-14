@@ -23,10 +23,12 @@ struct ProfileView: View {
     @State private var deleteErrorMessage: String? = nil
     @State private var showLegalPrivacySheet: Bool = false
     @State private var showChangePasswordSheet: Bool = false
+    @State private var showSubscriptionSheet: Bool = false
 
     @ObservedObject private var authManager = AuthManager.shared
     @ObservedObject private var syncManager = BackendSyncManager.shared
     @ObservedObject private var realtimeSocket = AccountRealtimeSocketManager.shared
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     var body: some View {
         NavigationStack {
@@ -43,8 +45,9 @@ struct ProfileView: View {
                         )
 
                         profileHeaderCard(profile: bindableProfile)
-                            accountTierCard
-                            fitnessGoalCard(profile: bindableProfile)
+                        overdueSubscriptionBanner
+                        accountTierCard
+                        fitnessGoalCard(profile: bindableProfile)
 
                             ProfileTargetWeightCard(
                                 profile: bindableProfile,
@@ -130,6 +133,9 @@ struct ProfileView: View {
             .sheet(isPresented: $showLegalPrivacySheet) {
                 LegalPrivacySheet()
             }
+            .sheet(isPresented: $showSubscriptionSheet) {
+                SubscriptionPaywallSheet()
+            }
             .sheet(isPresented: $showChangePasswordSheet) {
                 ChangePasswordSheet {
                     showToast("Senha alterada com sucesso!")
@@ -146,6 +152,9 @@ struct ProfileView: View {
             .task {
                 let active = FormaDataStore.shared.ensureSingleProfile(in: modelContext)
                 syncInputStrings(from: active)
+                if authManager.isAuthenticated {
+                    await subscriptionManager.refreshMySubscription()
+                }
             }
         }
     }
@@ -253,13 +262,111 @@ struct ProfileView: View {
                 Text(
                     authManager.isPro
                         ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e análise educacional de evolução via Google Gemini (sem caráter diagnóstico)."
-                        : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. O tipo da conta é definido pelo painel administrativo."
+                        : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. Assine ou resgate um cupom promocional para liberar a IA."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+                if let sub = subscriptionManager.currentSubscription {
+                    HStack(spacing: 8) {
+                        Image(systemName: sub.appliedCouponCode != nil ? "ticket.fill" : "calendar.badge.clock")
+                            .font(.caption)
+                            .foregroundStyle(FormaTheme.Colors.brand)
+                        Text(subscriptionSummaryLine(sub))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.045))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                Button {
+                    showSubscriptionSheet = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: authManager.isPro ? "slider.horizontal.3" : "crown.fill")
+                        Text(authManager.isPro ? "Gerenciar Assinatura, Planos & Cupons" : "Assinar Forma Pro ou Usar Cupom Grátis")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(authManager.isPro ? AnyShapeStyle(Color.primary.opacity(0.08)) : AnyShapeStyle(FormaTheme.Colors.aiGradient))
+                    .foregroundStyle(authManager.isPro ? FormaTheme.Colors.primaryText : .white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
         }
+    }
+
+    @ViewBuilder
+    private var overdueSubscriptionBanner: some View {
+        if subscriptionManager.isPastDue || (subscriptionManager.effectiveStatus == "PAUSED" && subscriptionManager.effectiveWarningMessage != nil) {
+            let isPaused = (subscriptionManager.effectiveStatus == "PAUSED")
+            FormaTintedCard(tint: isPaused ? FormaTheme.Colors.danger : FormaTheme.Colors.warning, padding: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isPaused ? "pause.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(isPaused ? FormaTheme.Colors.danger : FormaTheme.Colors.warning)
+                        Text(isPaused
+                             ? "Assinatura Pausada Após 3 Dias"
+                             : "Aviso de Atraso • Dia \(subscriptionManager.effectiveOverdueDay ?? 1) de 3")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                    }
+
+                    if let msg = subscriptionManager.effectiveWarningMessage, !msg.isEmpty {
+                        Text(msg)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 10) {
+                        Button {
+                            showSubscriptionSheet = true
+                        } label: {
+                            Text("Regularizar / Usar Cupom")
+                                .font(.caption.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(FormaTheme.Colors.warning)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+
+                        if subscriptionManager.isPastDue {
+                            Button {
+                                Task { await subscriptionManager.acknowledgeOverdueWarning() }
+                            } label: {
+                                Text("Ciente")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color.primary.opacity(0.08))
+                                    .foregroundStyle(FormaTheme.Colors.primaryText)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func subscriptionSummaryLine(_ sub: UserSubscriptionStatusInfo) -> String {
+        var parts: [String] = [sub.planName ?? "Forma Pro"]
+        parts.append("Status: \(sub.status)")
+        if let coupon = sub.appliedCouponCode, !coupon.isEmpty {
+            parts.append("Cupom: \(coupon)")
+        }
+        return parts.joined(separator: " • ")
     }
 
     private func fitnessGoalCard(@Bindable profile: Profile) -> some View {

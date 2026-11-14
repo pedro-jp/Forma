@@ -15,11 +15,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -115,19 +117,6 @@ public class AuthContextResolver {
     }
 
     public boolean isAdminAuthenticated(HttpServletRequest request, String adminKey, String cookieToken) {
-        String effectiveCookie = cookieToken;
-        if ((effectiveCookie == null || effectiveCookie.isBlank()) && request != null && request.getCookies() != null) {
-            for (Cookie c : request.getCookies()) {
-                if (ADMIN_COOKIE_NAME.equals(c.getName())) {
-                    effectiveCookie = c.getValue();
-                    break;
-                }
-            }
-        }
-        if (effectiveCookie != null && jwtService.validateAdminToken(effectiveCookie)) {
-            return true;
-        }
-
         if (request != null) {
             String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -146,10 +135,58 @@ public class AuthContextResolver {
             String trimmed = headerKey.trim();
             boolean matchesKey = constantTimeSecretMatch(trimmed, configuredAdminKey);
             boolean matchesPassword = constantTimeSecretMatch(trimmed, configuredAdminPassword);
-            return matchesKey || matchesPassword;
+            if (matchesKey || matchesPassword) {
+                return true;
+            }
+        }
+
+        String effectiveCookie = cookieToken;
+        if ((effectiveCookie == null || effectiveCookie.isBlank()) && request != null && request.getCookies() != null) {
+            for (Cookie c : request.getCookies()) {
+                if (ADMIN_COOKIE_NAME.equals(c.getName())) {
+                    effectiveCookie = c.getValue();
+                    break;
+                }
+            }
+        }
+        if (effectiveCookie != null && jwtService.validateAdminToken(effectiveCookie)) {
+            if (isMutatingMethod(request) && !passesCookieCsrfCheck(request)) {
+                return false;
+            }
+            return true;
         }
 
         return false;
+    }
+
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+
+    private boolean isMutatingMethod(HttpServletRequest request) {
+        if (request == null || request.getMethod() == null) return false;
+        return !SAFE_METHODS.contains(request.getMethod().toUpperCase());
+    }
+
+    private boolean passesCookieCsrfCheck(HttpServletRequest request) {
+        String secFetchSite = request.getHeader("Sec-Fetch-Site");
+        if (secFetchSite != null && "cross-site".equalsIgnoreCase(secFetchSite.trim())) {
+            return false;
+        }
+        String origin = request.getHeader("Origin");
+        if (origin != null && !origin.isBlank() && !"null".equalsIgnoreCase(origin.trim())) {
+            try {
+                URI uri = URI.create(origin.trim());
+                String originHost = uri.getHost();
+                String serverName = request.getServerName();
+                if (originHost == null) return false;
+                if (originHost.equalsIgnoreCase(serverName)) return true;
+                boolean localDev = ("localhost".equalsIgnoreCase(originHost) || "127.0.0.1".equals(originHost))
+                    && ("localhost".equalsIgnoreCase(serverName) || "127.0.0.1".equals(serverName));
+                return localDev;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public boolean constantTimeSecretMatch(String provided, String configured) {

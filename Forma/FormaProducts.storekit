@@ -1,0 +1,152 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "pt_BR",
+        "policyText" : "",
+        "policyURL" : "https://forma-94vp.onrender.com/privacy.html"
+      }
+    ]
+  },
+  "identifier" : "A4F1D2C3-9E41-4A1E-B7A2-112233445566",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6740000001",
+    "_developerTeamID" : "Q42LJ4LG32",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "pt_BR",
+    "_storefront" : "BRA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21501001",
+      "localizations" : [
+        {
+          "description" : "Acesso completo à IA do Forma, reconhecimento por foto, voz e geração de treinos.",
+          "displayName" : "Forma Pro",
+          "locale" : "pt_BR"
+        }
+      ],
+      "name" : "Forma Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "24.90",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6740000101",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Assinatura mensal do Forma Pro com IA completa.",
+              "displayName" : "Forma Pro Mensal",
+              "locale" : "pt_BR"
+            }
+          ],
+          "productID" : "jota.Forma.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Forma Pro Mensal",
+          "subscriptionGroupID" : "21501001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "199.90",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6740000102",
+          "introductoryOffer" : {
+            "internalID" : "6740000201",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Assinatura anual do Forma Pro com 7 dias grátis.",
+              "displayName" : "Forma Pro Anual",
+              "locale" : "pt_BR"
+            }
+          ],
+          "productID" : "jota.Forma.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Forma Pro Anual",
+          "subscriptionGroupID" : "21501001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

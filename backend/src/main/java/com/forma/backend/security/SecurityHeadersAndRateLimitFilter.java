@@ -107,6 +107,13 @@ public class SecurityHeadersAndRateLimitFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/ai/")) {
             return aiMaxRequestsPerMinute;
         }
+        if (path.equals("/api/subscriptions/validate-coupon")
+            || path.equals("/api/subscriptions/redeem-coupon")) {
+            return authMaxRequestsPerMinute;
+        }
+        if (path.startsWith("/api/webhooks/")) {
+            return Math.max(60, aiMaxRequestsPerMinute * 2);
+        }
         return -1;
     }
 

@@ -267,6 +267,139 @@ CREATE TABLE IF NOT EXISTS security_incident_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_security_incident_logs_ts ON security_incident_logs(detected_at_utc DESC);
 
+-- 17. Planos de Assinatura
+CREATE TABLE IF NOT EXISTS subscription_plans (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    description VARCHAR(500),
+    storekit_product_id VARCHAR(120),
+    billing_interval VARCHAR(24) NOT NULL,
+    price_cents INTEGER NOT NULL,
+    currency VARCHAR(8) DEFAULT 'BRL',
+    default_trial_days INTEGER DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at_utc TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 18. Cupons (Período Grátis & Descontos)
+CREATE TABLE IF NOT EXISTS coupons (
+    id UUID PRIMARY KEY,
+    code VARCHAR(64) NOT NULL UNIQUE,
+    description VARCHAR(255),
+    coupon_type VARCHAR(32) NOT NULL,
+    discount_percent INTEGER,
+    discount_cents INTEGER,
+    free_period_days INTEGER,
+    applicable_plan_id VARCHAR(64),
+    max_redemptions INTEGER,
+    current_redemptions INTEGER NOT NULL DEFAULT 0,
+    per_user_limit INTEGER NOT NULL DEFAULT 1,
+    expires_at_utc TIMESTAMP WITH TIME ZONE,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by_admin VARCHAR(80),
+    created_at_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_coupons_active_code ON coupons(active, code);
+
+-- 19. Resgates de Cupons
+CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id UUID PRIMARY KEY,
+    coupon_id UUID NOT NULL,
+    coupon_code VARCHAR(64) NOT NULL,
+    user_id UUID NOT NULL,
+    user_email VARCHAR(255),
+    subscription_id UUID,
+    benefit_summary VARCHAR(255),
+    redeemed_at_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_user_coupon ON coupon_redemptions(user_id, coupon_id);
+
+-- 20. Assinaturas de Usuários
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL UNIQUE,
+    user_email VARCHAR(255),
+    plan_id VARCHAR(64) NOT NULL,
+    plan_name VARCHAR(120),
+    source VARCHAR(32) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    price_cents INTEGER NOT NULL DEFAULT 0,
+    currency VARCHAR(8) DEFAULT 'BRL',
+    applied_coupon_code VARCHAR(64),
+    auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
+    external_transaction_id VARCHAR(160),
+    current_period_start_utc TIMESTAMP WITH TIME ZONE,
+    current_period_end_utc TIMESTAMP WITH TIME ZONE,
+    trial_ends_at_utc TIMESTAMP WITH TIME ZONE,
+    overdue_since_utc TIMESTAMP WITH TIME ZONE,
+    grace_ends_at_utc TIMESTAMP WITH TIME ZONE,
+    dunning_warnings_sent INTEGER NOT NULL DEFAULT 0,
+    last_warning_day_sent INTEGER NOT NULL DEFAULT 0,
+    last_warning_at_utc TIMESTAMP WITH TIME ZONE,
+    overdue_action_override VARCHAR(16),
+    paused_at_utc TIMESTAMP WITH TIME ZONE,
+    canceled_at_utc TIMESTAMP WITH TIME ZONE,
+    status_reason VARCHAR(255),
+    created_at_utc TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at_utc TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_grace ON user_subscriptions(status, grace_ends_at_utc);
+
+-- 21. Entradas Financeiras (Ledger de Receitas, Cupons e Estornos)
+CREATE TABLE IF NOT EXISTS payment_entries (
+    id UUID PRIMARY KEY,
+    user_id UUID,
+    user_email VARCHAR(255),
+    subscription_id UUID,
+    entry_type VARCHAR(32) NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    gross_amount_cents INTEGER NOT NULL DEFAULT 0,
+    discount_cents INTEGER NOT NULL DEFAULT 0,
+    net_amount_cents INTEGER NOT NULL DEFAULT 0,
+    currency VARCHAR(8) DEFAULT 'BRL',
+    payment_method VARCHAR(32) NOT NULL,
+    coupon_code VARCHAR(64),
+    reference_code VARCHAR(128),
+    description VARCHAR(255) NOT NULL,
+    paid_at_utc TIMESTAMP WITH TIME ZONE,
+    due_at_utc TIMESTAMP WITH TIME ZONE,
+    created_by VARCHAR(80),
+    created_at_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_payment_entries_status_ts ON payment_entries(status, created_at_utc DESC);
+
+-- 22. Webhooks de Cobrança Assinados (HMAC-SHA256)
+CREATE TABLE IF NOT EXISTS billing_webhook_events (
+    id UUID PRIMARY KEY,
+    event_id VARCHAR(128) NOT NULL UNIQUE,
+    provider VARCHAR(40) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    signature_valid BOOLEAN NOT NULL,
+    processing_status VARCHAR(32) NOT NULL,
+    target_user_email VARCHAR(255),
+    payload_excerpt TEXT,
+    error_message VARCHAR(500),
+    received_at_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_events_ts ON billing_webhook_events(received_at_utc DESC);
+
+-- 23. Régua de Cobrança e Avisos de Inadimplência (3 Dias)
+CREATE TABLE IF NOT EXISTS dunning_notices (
+    id UUID PRIMARY KEY,
+    subscription_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    user_email VARCHAR(255),
+    day_number INTEGER NOT NULL,
+    notice_type VARCHAR(32) NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    message VARCHAR(500) NOT NULL,
+    websocket_delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    email_delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    acknowledged_at_utc TIMESTAMP WITH TIME ZONE,
+    created_at_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dunning_notices_user_ts ON dunning_notices(user_id, created_at_utc DESC);
+
 -- ==============================================================================
 -- BLINDAGEM ROW LEVEL SECURITY (RLS) & BLOQUEIO DE POSTGREST (anon/authenticated)
 -- O backend Spring Boot conecta com role proprietária (postgres) via TLS/JDBC.
@@ -309,3 +442,17 @@ ALTER TABLE admin_audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admin_audit_logs FORCE ROW LEVEL SECURITY;
 ALTER TABLE security_incident_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE security_incident_logs FORCE ROW LEVEL SECURITY;
+ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscription_plans FORCE ROW LEVEL SECURITY;
+ALTER TABLE coupons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE coupons FORCE ROW LEVEL SECURITY;
+ALTER TABLE coupon_redemptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE coupon_redemptions FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_subscriptions FORCE ROW LEVEL SECURITY;
+ALTER TABLE payment_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_entries FORCE ROW LEVEL SECURITY;
+ALTER TABLE billing_webhook_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_webhook_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE dunning_notices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dunning_notices FORCE ROW LEVEL SECURITY;

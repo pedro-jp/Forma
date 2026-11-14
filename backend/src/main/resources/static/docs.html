@@ -247,9 +247,10 @@
         <a href="#seguranca">2. Segurança &amp; Criptografia</a>
         <a href="#lgpd">3. LGPD, ANPD, MCI &amp; Saúde</a>
         <a href="#endpoints">4. Rotas Web, REST &amp; WebSockets</a>
-        <a href="#banco">5. Dicionário das 16 Tabelas + RLS</a>
-        <a href="#admin-env">6. Painel Admin &amp; Variáveis</a>
-        <a href="#runbook">7. Runbook Operacional &amp; Incidentes</a>
+        <a href="#faturamento">5. Assinaturas, Cupons &amp; Atraso</a>
+        <a href="#banco">6. Dicionário das 23 Tabelas + RLS</a>
+        <a href="#admin-env">7. Painel Admin &amp; Variáveis</a>
+        <a href="#runbook">8. Runbook Operacional &amp; Incidentes</a>
       </nav>
     </aside>
 
@@ -265,8 +266,8 @@
         <ul>
           <li><strong>Clientes Apple (SwiftUI + SwiftData + WidgetKit):</strong> App iOS, Watch App e Live Activities compartilham App Group protegido, armazenam JWT/UID no Keychain (<code>AfterFirstUnlockThisDeviceOnly</code>) e sincronizam offline-first quando autenticados.</li>
           <li><strong>Backend API (Spring Boot 3.3 / Java 21):</strong> Hospedado no Render com modo fail-closed em PostgreSQL (<code>RENDER=true</code> / <code>APP_ALLOW_H2_FALLBACK=false</code>), proxy exclusivo para a Google Gemini API, WebSockets em tempo real e exposição estática de portal, docs e SPA admin.</li>
-          <li><strong>Persistência (Supabase PostgreSQL):</strong> 16 tabelas isoladas por <code>user_id</code> com Row-Level Security (RLS) e criptografia simétrica em repouso <code>ENC:v1:</code> em colunas sensíveis.</li>
-          <li><strong>Console Administrativo (React 19 + Vite + TypeScript):</strong> Autenticado por cookie <code>HttpOnly; SameSite=Lax; Secure</code> com handshakes WebSocket validados server-side e auditoria Art. 37.</li>
+          <li><strong>Persistência (Supabase PostgreSQL):</strong> 23 tabelas isoladas por <code>user_id</code> com Row-Level Security (RLS) e criptografia simétrica em repouso <code>ENC:v1:</code> em colunas sensíveis.</li>
+          <li><strong>Console Administrativo (React 19 + Vite + TypeScript):</strong> Autenticado por cookie <code>HttpOnly; SameSite=Strict; Secure</code>, proteção anti-CSRF, bloqueio de força bruta, gestão financeira/cupons e WebSockets em tempo real.</li>
         </ul>
 
         <div class="diagram-wrap" aria-label="Diagrama de Arquitetura do Ecossistema Forma">
@@ -301,7 +302,7 @@
 
             <rect x="702" y="20" width="204" height="106" rx="14" fill="#111b2a" stroke="#32d79b" stroke-width="1.5"/>
             <text x="804" y="46" fill="#32d79b" font-size="13" font-weight="bold" text-anchor="middle">Supabase PostgreSQL</text>
-            <text x="804" y="68" fill="#cbd5e1" font-size="11" text-anchor="middle">16 Tabelas • Fail-Closed Prod</text>
+            <text x="804" y="68" fill="#cbd5e1" font-size="11" text-anchor="middle">23 Tabelas • Fail-Closed Prod</text>
             <text x="804" y="88" fill="#cbd5e1" font-size="11" text-anchor="middle">Row-Level Security (RLS)</text>
             <text x="804" y="108" fill="#cbd5e1" font-size="11" text-anchor="middle">Tombstone &amp; Audit Trails</text>
 
@@ -418,8 +419,18 @@
 }</pre>
       </section>
 
+      <section id="faturamento" class="doc-section" data-searchable="assinaturas billing storekit cupons gratis webhook hmac atraso 3 dias dunning entradas financeiras mrr">
+        <h2>5. Assinaturas, Cupons Grátis, StoreKit 2, Webhooks &amp; Régua de Atraso</h2>
+        <ul>
+          <li><strong>StoreKit 2 sem Conta Apple Paga:</strong> O catálogo <code>Forma/FormaProducts.storekit</code> (planos <code>jota.Forma.pro.monthly</code> e <code>jota.Forma.pro.yearly</code>) permite testar fluxos locais no Xcode mesmo em Personal Team, enquanto cupons de período grátis funcionam em nuvem imediatamente.</li>
+          <li><strong>Rotas de Assinatura do App:</strong> <code>GET /api/subscriptions/plans</code>, <code>GET /api/subscriptions/me</code>, <code>POST /api/subscriptions/validate-coupon</code>, <code>POST /api/subscriptions/redeem-coupon</code>, <code>POST /api/subscriptions/sync-storekit</code> e <code>POST /api/subscriptions/acknowledge-warning</code>.</li>
+          <li><strong>Webhooks Assinados (HMAC-SHA256):</strong> <code>POST /api/webhooks/billing</code> exige assinatura válida no cabeçalho <code>X-Forma-Webhook-Signature</code>, aplica idempotência por <code>eventId</code> e audita todos os eventos recebidos.</li>
+          <li><strong>Régua de Inadimplência de 3 Dias:</strong> Em falhas de cobrança ou renovação vencida, a assinatura vai para <code>PAST_DUE</code>, envia <strong>avisos diários durante 3 dias</strong> (Dia 1, 2 e 3 via WebSocket <code>/ws/account</code>) e, ao término do 3º dia, executa a ação configurada no Console Admin (<strong>Pausar <code>PAUSED</code></strong> ou <strong>Cancelar <code>CANCELED</code></strong>) retornando o titular para <code>FREE</code>.</li>
+        </ul>
+      </section>
+
       <section id="banco" class="doc-section" data-searchable="banco postgresql supabase tabelas rls row level security schema">
-        <h2>5. Modelo de Dados — 16 Tabelas PostgreSQL + RLS</h2>
+        <h2>6. Modelo de Dados — 23 Tabelas PostgreSQL + RLS</h2>
         <p>Definidas em <code>backend/supabase_schema.sql</code> e <code>backend/src/main/resources/schema.sql</code>, todas protegidas por <code>ENABLE ROW LEVEL SECURITY</code> e revogação de privilégios anônimos (<code>REVOKE ALL ON ... FROM anon, authenticated</code>):</p>
         <table>
           <thead>
@@ -432,17 +443,18 @@
             <tr><td><code>users</code></td><td>Credenciais BCrypt, <code>token_version</code>, <code>reset_code_attempts</code>, flags de consentimento/maioridade, tokens OAuth cifrados <code>ENC:v1:</code>.</td></tr>
             <tr><td><code>user_profiles</code>, <code>food_entries</code>, <code>workout_entries</code>, <code>workout_routines</code>, <code>water_entries</code>, <code>weight_entries</code>, <code>ai_analyses</code></td><td>Dados nutricionais e de treino particionados estritamente por <code>user_id</code> (FK <code>ON DELETE CASCADE</code> e políticas RLS próprias).</td></tr>
             <tr><td><code>ai_request_logs</code> &amp; <code>user_activity_logs</code></td><td>Contagem de cota diária por usuário e feed operacional sanitizado no painel admin.</td></tr>
-            <tr><td><code>app_config</code></td><td>Configurações globais (<code>GEMINI_API_KEY</code>, <code>RESEND_API_KEY</code> e <code>APPLE_PRIVATE_KEY</code> cifradas com <code>ENC:v1:</code>).</td></tr>
+            <tr><td><code>app_config</code></td><td>Configurações globais (<code>GEMINI_API_KEY</code>, <code>RESEND_API_KEY</code>, <code>APPLE_PRIVATE_KEY</code> e <code>BILLING_WEBHOOK_SECRET</code> cifradas com <code>ENC:v1:</code>).</td></tr>
             <tr><td><code>deleted_accounts_tombstone</code></td><td>Bloqueia re-emissão ou uso tardio de sessões de contas excluídas (anti-ressurreição).</td></tr>
             <tr><td><code>legal_consent_ledger</code></td><td>Trilha imutável de consentimentos com versão, SHA-256 das políticas e pseudonimização automática na exclusão.</td></tr>
             <tr><td><code>mci_access_logs</code></td><td>Guarda do Marco Civil (180 dias) com <code>account_ref_hash</code> HMAC, porta de origem e IP cifrado AES-256-GCM.</td></tr>
             <tr><td><code>admin_audit_logs</code> &amp; <code>security_incident_logs</code></td><td>Auditoria de ações administrativas (LGPD Art. 37) e registro estruturado de incidentes ANPD (Res. 15/2024).</td></tr>
+            <tr><td><code>subscription_plans</code>, <code>coupons</code>, <code>coupon_redemptions</code>, <code>user_subscriptions</code>, <code>payment_entries</code>, <code>billing_webhook_events</code>, <code>dunning_notices</code></td><td>Planos StoreKit/Web, cupons de período grátis ou desconto, histórico de entradas financeiras, webhooks assinados e avisos da régua de atraso (com <code>ENABLE/FORCE RLS</code>).</td></tr>
           </tbody>
         </table>
       </section>
 
       <section id="admin-env" class="doc-section" data-searchable="admin painel variaveis ambiente render production env jwt encryption">
-        <h2>6. Console Admin &amp; Variáveis de Ambiente Obrigatórias</h2>
+        <h2>7. Console Admin &amp; Variáveis de Ambiente Obrigatórias</h2>
         <p>Em produção (<code>RENDER=true</code> ou <code>APP_ALLOW_H2_FALLBACK=false</code>), o servidor recusa iniciar sem <code>SPRING_DATASOURCE_URL</code> PostgreSQL (fail-closed) e exige segredos fortes no ambiente:</p>
         <table>
           <thead>
@@ -463,7 +475,7 @@
       </section>
 
       <section id="runbook" class="doc-section" data-searchable="runbook operacao incidentes anpd backup rotacao chaves">
-        <h2>7. Runbook Operacional, Contingência &amp; Resposta ANPD</h2>
+        <h2>8. Runbook Operacional, Contingência &amp; Resposta ANPD</h2>
         <ol>
           <li><strong>Contenção imediata de IA:</strong> Em anomalia de provedor ou abuso, acionar o Kill-Switch global no Console Admin (<code>POST /api/admin/killswitch</code>) ou suspender o usuário afetado (<code>POST /api/admin/users/{id}/ai-access</code>).</li>
           <li><strong>Rotação de segredos e revogação em massa:</strong> Rotacionar <code>GEMINI_API_KEY</code> via Console Admin e <code>APP_JWT_SECRET</code> / <code>APP_ENCRYPTION_KEY</code> apenas via janela controlada (observando re-cifragem prévia de chaves se alterar <code>APP_ENCRYPTION_KEY</code>).</li>

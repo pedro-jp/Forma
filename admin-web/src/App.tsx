@@ -1,35 +1,75 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, LogOut, Wifi, WifiOff, RefreshCw, ShieldAlert, FileText } from 'lucide-react';
-import { AdminOverview, WebSocketEvent, AiLogSummary } from './types';
-
-interface AdminAuditLogItem {
-  id: string;
-  adminActor: string;
-  actionType: string;
-  targetRef?: string;
-  detailSummary?: string;
-  createdAtUtc: string;
-}
-
-interface SecurityIncidentItem {
-  id: string;
-  severity: string;
-  incidentType: string;
-  description: string;
-  anpdNotified: boolean;
-  detectedAtUtc: string;
-}
+import {
+  Sparkles,
+  LogOut,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  LayoutDashboard,
+  Wallet,
+  CreditCard,
+  Ticket,
+  Users,
+  ShieldCheck
+} from 'lucide-react';
+import {
+  AdminAuditItem,
+  AdminOverview,
+  AiLogSummary,
+  BillingDashboardData,
+  SecurityIncidentItem,
+  WebSocketEvent
+} from './types';
 import { LoginModal } from './components/LoginModal';
 import { KillSwitchCard } from './components/KillSwitchCard';
 import { StatsCards } from './components/StatsCards';
 import { GeminiConfigCard } from './components/GeminiConfigCard';
 import { LiveActivityFeed } from './components/LiveActivityFeed';
 import { UsersTable } from './components/UsersTable';
+import { BillingDashboardTab } from './components/BillingDashboardTab';
+import { SubscriptionsManagerTab } from './components/SubscriptionsManagerTab';
+import { CouponsManagerTab } from './components/CouponsManagerTab';
+import { WebhooksSecurityTab } from './components/WebhooksSecurityTab';
+
+type AdminTabId = 'overview' | 'finance' | 'subscriptions' | 'coupons' | 'users' | 'webhooks';
+
+const EMPTY_BILLING: BillingDashboardData = {
+  mrrCents: 0,
+  arrCents: 0,
+  paidRevenue30dCents: 0,
+  totalNetRevenueCents: 0,
+  pendingRevenueCents: 0,
+  refundedTotalCents: 0,
+  activeSubscribersCount: 0,
+  trialingCount: 0,
+  pastDueDay1Count: 0,
+  pastDueDay2Count: 0,
+  pastDueDay3Count: 0,
+  pausedCount: 0,
+  canceledCount: 0,
+  couponRedemptionsCount: 0,
+  overdueActionPolicy: 'PAUSE',
+  graceDays: 3,
+  dailyRevenueLast14Days: [],
+  plans: [],
+  subscriptions: [],
+  coupons: [],
+  recentRedemptions: [],
+  recentEntries: [],
+  recentDunningNotices: [],
+  recentWebhooks: [],
+  webhookConfig: {
+    endpointPath: '/api/webhooks/billing',
+    signatureHeader: 'X-Forma-Webhook-Signature',
+    maskedSecret: 'Carregando...'
+  }
+};
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [adminUsername, setAdminUsername] = useState('admin');
   const [wsConnected, setWsConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState<AdminTabId>('overview');
   const [lastUpdatedCard, setLastUpdatedCard] = useState<string | undefined>(undefined);
 
   const [overview, setOverview] = useState<AdminOverview>({
@@ -44,7 +84,8 @@ export const App: React.FC = () => {
     recentUsers: [],
     recentLogs: []
   });
-  const [auditLogs, setAuditLogs] = useState<AdminAuditLogItem[]>([]);
+  const [billing, setBilling] = useState<BillingDashboardData>(EMPTY_BILLING);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditItem[]>([]);
   const [incidents, setIncidents] = useState<SecurityIncidentItem[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -96,8 +137,9 @@ export const App: React.FC = () => {
 
   const loadOverview = async () => {
     try {
-      const [resp, auditResp, incResp] = await Promise.all([
+      const [resp, billingResp, auditResp, incResp] = await Promise.all([
         fetch('/api/admin/overview', { credentials: 'include' }),
+        fetch('/api/admin/billing/dashboard', { credentials: 'include' }),
         fetch('/api/admin/audit-logs', { credentials: 'include' }),
         fetch('/api/admin/incidents', { credentials: 'include' })
       ]);
@@ -108,24 +150,26 @@ export const App: React.FC = () => {
         setIsAuthenticated(false);
         return;
       }
+      if (billingResp.ok) {
+        const bData = await billingResp.json();
+        setBilling(bData);
+      }
       if (auditResp.ok) {
         const auditData = await auditResp.json();
-        if (Array.isArray(auditData)) setAuditLogs(auditData.slice(0, 12));
+        if (Array.isArray(auditData)) setAuditLogs(auditData.slice(0, 15));
       }
       if (incResp.ok) {
         const incData = await incResp.json();
-        if (Array.isArray(incData)) setIncidents(incData.slice(0, 8));
+        if (Array.isArray(incData)) setIncidents(incData.slice(0, 10));
       }
     } catch (e) {
-      console.warn('Erro ao carregar overview:', e);
+      console.warn('Erro ao carregar dados do painel:', e);
     }
   };
 
-  // Conexão WebSocket em Tempo Real
   const connectWebSocket = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    // Detecta host do backend: se estiver rodando no Vite (5173), aponta para 8085
     let wsHost = window.location.host;
     if (wsHost.includes('5173')) {
       wsHost = window.location.hostname + ':8085';
@@ -133,51 +177,33 @@ export const App: React.FC = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${wsHost}/ws/admin`;
 
-    console.log('[WebSocket] Conectando a:', wsUrl);
-
     try {
       const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
 
-      socket.onopen = () => {
-        console.log('[WebSocket] Conexão estabelecida com sucesso!');
-        setWsConnected(true);
-      };
+      socket.onopen = () => setWsConnected(true);
 
       socket.onmessage = (event) => {
         try {
           if (event.data === 'pong') return;
           const msg: WebSocketEvent = JSON.parse(event.data);
           handleWebSocketMessage(msg);
-        } catch (e) {
-          console.warn('[WebSocket] Mensagem não-JSON:', event.data);
-        }
+        } catch (e) {}
       };
 
       socket.onclose = () => {
-        console.warn('[WebSocket] Conexão encerrada. Reconectando em 3s...');
         setWsConnected(false);
         wsRef.current = null;
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (isAuthenticated) {
-            connectWebSocket();
-          }
+          if (isAuthenticated) connectWebSocket();
         }, 3000);
       };
 
-      socket.onerror = (err) => {
-        console.error('[WebSocket] Erro de transporte:', err);
-        socket.close();
-      };
-    } catch (err) {
-      console.error('[WebSocket] Erro ao instanciar socket:', err);
-    }
+      socket.onerror = () => socket.close();
+    } catch (err) {}
   };
 
-  // Processa eventos em tempo real transmitidos pelo backend
   const handleWebSocketMessage = (event: WebSocketEvent) => {
-    console.log('[WebSocket Event]', event.type, event.data);
-
     switch (event.type) {
       case 'AI_REQUEST': {
         const reqData = event.data;
@@ -191,7 +217,6 @@ export const App: React.FC = () => {
           durationMs: reqData.durationMs,
           createdAt: reqData.createdAt
         };
-
         setOverview((prev) => ({
           ...prev,
           totalAiRequests: reqData.totalAiRequests || prev.totalAiRequests + 1,
@@ -212,20 +237,14 @@ export const App: React.FC = () => {
 
       case 'KILL_SWITCH_CHANGED': {
         if (event.data && typeof event.data.isBlocked === 'boolean') {
-          setOverview((prev) => ({
-            ...prev,
-            aiBlocked: event.data.isBlocked
-          }));
+          setOverview((prev) => ({ ...prev, aiBlocked: event.data.isBlocked }));
         }
         break;
       }
 
       case 'USER_ACTIVITY': {
         if (event.data && typeof event.data.totalUsers === 'number') {
-          setOverview((prev) => ({
-            ...prev,
-            totalUsers: event.data.totalUsers
-          }));
+          setOverview((prev) => ({ ...prev, totalUsers: event.data.totalUsers }));
           setLastUpdatedCard('users');
           loadOverview();
         }
@@ -261,10 +280,14 @@ export const App: React.FC = () => {
         }
         break;
       }
+
+      case 'BILLING_UPDATED': {
+        loadOverview();
+        break;
+      }
     }
   };
 
-  // Toggle do Kill-Switch
   const handleToggleKillSwitch = async (newState: boolean) => {
     try {
       const resp = await fetch('/api/admin/killswitch', {
@@ -273,7 +296,6 @@ export const App: React.FC = () => {
         credentials: 'include',
         body: JSON.stringify({ blocked: newState })
       });
-
       if (resp.ok) {
         const data = await resp.json();
         setOverview((prev) => ({ ...prev, aiBlocked: data.isBlocked }));
@@ -285,32 +307,46 @@ export const App: React.FC = () => {
 
   if (isAuthenticated === null) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        color: 'var(--text-secondary)'
-      }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--text-secondary)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <RefreshCw size={20} className="live-pulse" />
-          <span>Verificando autenticação...</span>
+          <RefreshCw size={18} className="live-pulse" />
+          <span>Verificando sessão segura...</span>
         </div>
       </div>
     );
   }
 
   if (!isAuthenticated) {
-    return <LoginModal onLoginSuccess={(user) => {
-      setAdminUsername(user);
-      setIsAuthenticated(true);
-    }} />;
+    return (
+      <LoginModal
+        onLoginSuccess={(user) => {
+          setAdminUsername(user);
+          setIsAuthenticated(true);
+        }}
+      />
+    );
   }
 
+  const overdueTotal = billing.pastDueDay1Count + billing.pastDueDay2Count + billing.pastDueDay3Count;
+
+  const navItems: { id: AdminTabId; label: string; icon: React.ReactNode; badge?: number; badgeColor?: string }[] = [
+    { id: 'overview', label: 'Visão Geral & IA', icon: <LayoutDashboard size={15} /> },
+    { id: 'finance', label: 'Receita & Entradas', icon: <Wallet size={15} /> },
+    {
+      id: 'subscriptions',
+      label: 'Inscrições & 3 Dias',
+      icon: <CreditCard size={15} />,
+      badge: overdueTotal > 0 ? overdueTotal : undefined,
+      badgeColor: '#fbbf24'
+    },
+    { id: 'coupons', label: 'Cupons & Período Grátis', icon: <Ticket size={15} />, badge: billing.coupons.filter((c) => c.active).length || undefined },
+    { id: 'users', label: 'Usuários', icon: <Users size={15} />, badge: overview.totalUsers || undefined },
+    { id: 'webhooks', label: 'Webhooks & Segurança', icon: <ShieldCheck size={15} /> }
+  ];
+
   return (
-    <div style={{ minHeight: '100vh', padding: '24px' }}>
-      <div style={{ maxWidth: '1240px', margin: '0 auto' }}>
-        
+    <div style={{ minHeight: '100vh', padding: '20px 24px 48px' }}>
+      <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
         {/* Top Navbar */}
         <header style={{
           display: 'flex',
@@ -318,185 +354,167 @@ export const App: React.FC = () => {
           justifyContent: 'space-between',
           flexWrap: 'wrap',
           gap: '16px',
-          marginBottom: '32px',
-          paddingBottom: '20px',
+          marginBottom: '20px',
+          paddingBottom: '16px',
           borderBottom: '1px solid var(--border-color)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '14px',
+              width: '40px',
+              height: '40px',
+              borderRadius: '11px',
               backgroundColor: '#10b981',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#042f1a',
-              boxShadow: '0 4px 18px rgba(16, 185, 129, 0.4)'
+              color: '#042f1a'
             }}>
-              <Sparkles size={24} />
+              <Sparkles size={21} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h1 style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>Forma Live Ops</h1>
+                <h1 style={{ fontSize: '19px', fontWeight: 800, letterSpacing: '-0.4px' }}>Forma Live Ops</h1>
                 <span style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                  padding: '2px 8px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  padding: '2px 7px',
                   borderRadius: '6px',
-                  fontSize: '11px',
+                  fontSize: '10px',
                   fontWeight: 700,
-                  color: 'var(--text-secondary)'
-                }}>Vite + React</span>
+                  color: '#34d399'
+                }}>PRODUÇÃO BLINDADA</span>
               </div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Painel Administrativo &amp; Monitoramento em Tempo Real
+                Operações, Faturamento, Régua de Cobrança &amp; Segurança
               </span>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: 600 }}>
               <a href="/" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Portal</a>
               <a href="/docs" style={{ color: '#34d399', textDecoration: 'none' }}>Docs</a>
               <a href="/privacy" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>LGPD</a>
               <a href="/terms" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Termos</a>
             </div>
-            {/* WebSocket Status Pill */}
+
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              padding: '6px 14px',
+              gap: '7px',
+              padding: '6px 12px',
               borderRadius: '999px',
               fontSize: '12px',
               fontWeight: 700,
-              backgroundColor: wsConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              backgroundColor: wsConnected ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
               color: wsConnected ? '#34d399' : '#f87171',
-              border: `1px solid ${wsConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+              border: `1px solid ${wsConnected ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`
             }}>
-              {wsConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-              <span>{wsConnected ? '🟢 WebSocket em Tempo Real' : '🔴 Reconectando WebSocket...'}</span>
+              {wsConnected ? <Wifi size={13} /> : <WifiOff size={13} />}
+              <span>{wsConnected ? 'Tempo Real' : 'Reconectando...'}</span>
             </div>
 
-            {/* Admin Profile & Logout */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
               padding: '6px 12px',
-              borderRadius: '12px',
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid var(--border-color)',
               fontSize: '13px',
               fontWeight: 600
             }}>
-              <span>👤 {adminUsername}</span>
+              <span>{adminUsername}</span>
               <button
                 onClick={handleLogout}
                 title="Sair do Painel"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '2px'
-                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: '2px' }}
               >
-                <LogOut size={16} />
+                <LogOut size={15} />
               </button>
             </div>
           </div>
         </header>
 
-        {/* Kill Switch Card */}
-        <KillSwitchCard
-          isBlocked={overview.aiBlocked}
-          onToggle={handleToggleKillSwitch}
-        />
+        {/* Command Navigation Bar */}
+        <nav className="nav-tabs" aria-label="Navegação administrativa">
+          {navItems.map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`nav-tab-btn ${isActive ? 'is-active' : ''}`}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                {item.badge !== undefined && (
+                  <span
+                    className="tabular-nums"
+                    style={{
+                      padding: '1px 6px',
+                      borderRadius: '999px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      backgroundColor: item.badgeColor ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.08)',
+                      color: item.badgeColor || 'var(--text-secondary)'
+                    }}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
 
-        {/* Stats Cards */}
-        <StatsCards
-          totalUsers={overview.totalUsers}
-          totalFoods={overview.totalFoods}
-          totalWorkouts={overview.totalWorkouts}
-          totalAiRequests={overview.totalAiRequests}
-          lastUpdatedKey={lastUpdatedCard}
-        />
+        {/* Active Tab View */}
+        {activeTab === 'overview' && (
+          <>
+            <KillSwitchCard isBlocked={overview.aiBlocked} onToggle={handleToggleKillSwitch} />
+            <StatsCards
+              totalUsers={overview.totalUsers}
+              totalFoods={overview.totalFoods}
+              totalWorkouts={overview.totalWorkouts}
+              totalAiRequests={overview.totalAiRequests}
+              lastUpdatedKey={lastUpdatedCard}
+            />
+            <GeminiConfigCard
+              activeKeyMasked={overview.activeApiKeyMasked}
+              hasValidKey={overview.hasValidApiKey}
+              currentModel={overview.geminiModel}
+              onConfigSaved={loadOverview}
+            />
+            <LiveActivityFeed logs={overview.recentLogs} connectedClientsCount={wsConnected ? 1 : 0} />
+          </>
+        )}
 
-        {/* Gemini Config Card */}
-        <GeminiConfigCard
-          activeKeyMasked={overview.activeApiKeyMasked}
-          hasValidKey={overview.hasValidApiKey}
-          currentModel={overview.geminiModel}
-          onConfigSaved={loadOverview}
-        />
+        {activeTab === 'finance' && (
+          <BillingDashboardTab data={billing} users={overview.recentUsers} onRefresh={loadOverview} />
+        )}
 
-        {/* Live Activity Feed */}
-        <LiveActivityFeed
-          logs={overview.recentLogs}
-          connectedClientsCount={wsConnected ? 1 : 0}
-        />
+        {activeTab === 'subscriptions' && (
+          <SubscriptionsManagerTab data={billing} users={overview.recentUsers} onRefresh={loadOverview} />
+        )}
 
-        {/* Registered Users */}
-        <UsersTable
-          users={overview.recentUsers}
-          onRefresh={loadOverview}
-        />
+        {activeTab === 'coupons' && (
+          <CouponsManagerTab data={billing} onRefresh={loadOverview} />
+        )}
 
-        {/* LGPD Audit & Security Incidents */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: '20px',
-          marginTop: '24px'
-        }}>
-          <section className="glass-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <FileText size={18} color="#34d399" />
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Auditoria Administrativa (LGPD Art. 37)</h3>
-            </div>
-            {auditLogs.length === 0 ? (
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sem eventos administrativos recentes.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
-                {auditLogs.map((item) => (
-                  <div key={item.id} style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                      <span>{item.actionType}</span>
-                      <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{new Date(item.createdAtUtc).toLocaleString('pt-BR')}</span>
-                    </div>
-                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      Ator: {item.adminActor}{item.detailSummary ? ` — ${item.detailSummary}` : ''}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+        {activeTab === 'users' && (
+          <UsersTable users={overview.recentUsers} onRefresh={loadOverview} />
+        )}
 
-          <section className="glass-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <ShieldAlert size={18} color="#fbbf24" />
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Incidentes de Segurança (ANPD Res. 15/2024)</h3>
-            </div>
-            {incidents.length === 0 ? (
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Nenhum incidente de segurança registrado.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
-                {incidents.map((inc) => (
-                  <div key={inc.id} style={{ padding: '8px 10px', borderRadius: '10px', backgroundColor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                      <span>[{inc.severity}] {inc.incidentType}</span>
-                      <span style={{ color: inc.anpdNotified ? '#34d399' : '#fbbf24' }}>{inc.anpdNotified ? 'ANPD Notificada' : 'Em Triagem'}</span>
-                    </div>
-                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>{inc.description}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+        {activeTab === 'webhooks' && (
+          <WebhooksSecurityTab
+            data={billing}
+            users={overview.recentUsers}
+            auditLogs={auditLogs}
+            incidents={incidents}
+            onRefresh={loadOverview}
+          />
+        )}
       </div>
     </div>
   );

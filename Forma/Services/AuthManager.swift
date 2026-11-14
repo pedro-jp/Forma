@@ -364,6 +364,8 @@ public final class AuthManager: ObservableObject {
         AccountRealtimeSocketManager.shared.connectIfNeeded()
         Task { @MainActor in
             await AIDataConsentManager.shared.refreshFromBackendIfAuthenticated()
+            await SubscriptionManager.shared.loadStoreKitProducts()
+            await SubscriptionManager.shared.refreshMySubscription()
         }
     }
 
@@ -612,6 +614,7 @@ public final class AuthManager: ObservableObject {
     public func logout() {
         let tokenToRevoke = self.jwtToken
         AccountRealtimeSocketManager.shared.disconnect()
+        SubscriptionManager.shared.resetOnLogout()
         toastDismissTask?.cancel()
         self.realtimeToastMessage = nil
         self.isAuthenticated = false
@@ -787,6 +790,9 @@ public final class AuthManager: ObservableObject {
             self.isAuthenticated = true
         }
         AccountRealtimeSocketManager.shared.connectIfNeeded(forceReconnect: true)
+        Task { @MainActor in
+            await SubscriptionManager.shared.refreshMySubscription()
+        }
     }
 }
 
@@ -983,7 +989,30 @@ public final class AccountRealtimeSocketManager: ObservableObject {
                 AuthManager.shared.updateAccountTier(rawTier, notifyUser: true)
             }
 
-            if let event = json["event"] as? String, event == "ADMIN_USER_RESET" {
+            let eventName = json["event"] as? String
+            let subStatus = json["subscriptionStatus"] as? String
+            let overdueDay = json["overdueDay"] as? Int
+            let graceEndsAtUtc = json["graceEndsAtUtc"] as? String
+            let warningMessage = json["warningMessage"] as? String
+
+            if subStatus != nil || overdueDay != nil || warningMessage != nil ||
+                (eventName?.hasPrefix("SUBSCRIPTION_") == true) {
+                SubscriptionManager.shared.applyRealtimeEvent(
+                    subscriptionStatus: subStatus,
+                    overdueDay: overdueDay,
+                    graceEndsAtUtc: graceEndsAtUtc,
+                    warningMessage: warningMessage
+                )
+            }
+
+            if let warningMessage, !warningMessage.isEmpty,
+               eventName == "SUBSCRIPTION_OVERDUE_WARNING"
+                || eventName == "SUBSCRIPTION_ENFORCED"
+                || eventName == "SUBSCRIPTION_EXPIRED" {
+                AuthManager.shared.showRealtimeToast(warningMessage)
+            }
+
+            if eventName == "ADMIN_USER_RESET" {
                 Task { @MainActor in
                     await BackendSyncManager.shared.sync(context: FormaDataStore.shared.mainContext, forcePull: true)
                 }

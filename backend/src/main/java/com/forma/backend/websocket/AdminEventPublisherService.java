@@ -80,6 +80,33 @@ public class AdminEventPublisherService {
         runAfterCommitOrNow(() -> userAccountWebSocketHandler.sendAccountStateToUser(user, eventName));
     }
 
+    public void publishUserSubscriptionState(
+        User user,
+        String eventName,
+        String subscriptionStatus,
+        Integer overdueDay,
+        String graceEndsAtUtc,
+        String warningMessage
+    ) {
+        if (userAccountWebSocketHandler == null || user == null) return;
+        runAfterCommitOrNow(() -> userAccountWebSocketHandler.sendSubscriptionStateToUser(
+            user,
+            eventName,
+            subscriptionStatus,
+            overdueDay,
+            graceEndsAtUtc,
+            warningMessage
+        ));
+    }
+
+    public void publishBillingUpdated(String reason) {
+        if (webSocketHandler == null) return;
+        runAfterCommitOrNow(() -> webSocketHandler.broadcast("BILLING_UPDATED", Map.of(
+            "reason", reason != null ? reason : "UPDATED",
+            "timestamp", java.time.Instant.now().toString()
+        )));
+    }
+
     public void publishUserAccountDeleted(UUID userId) {
         if (userAccountWebSocketHandler == null || userId == null) return;
         runAfterCommitOrNow(() -> userAccountWebSocketHandler.sendAccountDeletedToUser(userId));
