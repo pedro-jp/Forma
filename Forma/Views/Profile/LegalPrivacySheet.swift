@@ -6,9 +6,20 @@
 //
 
 import SwiftUI
+import SwiftData
+
+private struct PrivacyLogPreviewItem: Identifiable {
+    let id: String
+    let badge: String
+    let title: String
+    let detail: String
+    let icon: String
+    let sortDate: Date
+}
 
 struct LegalPrivacySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var aiConsent = AIDataConsentManager.shared
     @ObservedObject private var authManager = AuthManager.shared
 
@@ -16,6 +27,10 @@ struct LegalPrivacySheet: View {
     @State private var exportErrorMessage: String? = nil
     @State private var exportedFileURL: URL? = nil
     @State private var showExportShareSheet: Bool = false
+    @State private var isLoadingLogs: Bool = false
+    @State private var logPreviewItems: [PrivacyLogPreviewItem] = []
+    @State private var logCounts: (consents: Int, accesses: Int, aiCalls: Int, activities: Int) = (0, 0, 0, 0)
+    @State private var fallbackNoticeMessage: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -170,10 +185,83 @@ struct LegalPrivacySheet: View {
                                 Text("Portabilidade de Dados (LGPD Art. 18 V)")
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
+                                Spacer(minLength: 4)
+                                if authManager.isAuthenticated {
+                                    Button {
+                                        Task { await loadAccountLogs() }
+                                    } label: {
+                                        if isLoadingLogs {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Image(systemName: "arrow.clockwise")
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(FormaTheme.Colors.brand)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isLoadingLogs)
+                                    .accessibilityLabel("Atualizar registros de auditoria e atividades")
+                                }
                             }
                             Text("Exporte a qualquer momento uma cópia completa dos seus dados cadastrais, perfil, refeições, treinos, hidratação, histórico de consentimentos e registros de auditoria de IA em formato JSON.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+
+                            if authManager.isAuthenticated {
+                                HStack(spacing: 8) {
+                                    logMetricChip(title: "Consentimentos", count: logCounts.consents)
+                                    logMetricChip(title: "Acessos", count: logCounts.accesses)
+                                    logMetricChip(title: "IA", count: logCounts.aiCalls)
+                                    logMetricChip(title: "Atividades", count: logCounts.activities)
+                                }
+
+                                if let fallbackNoticeMessage {
+                                    FormaBanner(message: fallbackNoticeMessage, style: .info)
+                                }
+
+                                if logPreviewItems.isEmpty && !isLoadingLogs {
+                                    Text("Nenhum registro recente encontrado.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if !logPreviewItems.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        ForEach(logPreviewItems.prefix(6)) { item in
+                                            HStack(alignment: .top, spacing: 10) {
+                                                Image(systemName: item.icon)
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundStyle(FormaTheme.Colors.brand)
+                                                    .frame(width: 18, height: 18)
+                                                    .padding(.top, 1)
+
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    HStack(spacing: 6) {
+                                                        Text(item.badge)
+                                                            .font(.caption2.weight(.bold))
+                                                            .foregroundStyle(FormaTheme.Colors.brand)
+                                                            .padding(.horizontal, 6)
+                                                            .padding(.vertical, 2)
+                                                            .background(FormaTheme.Colors.brand.opacity(0.12))
+                                                            .clipShape(Capsule())
+                                                        Text(item.title)
+                                                            .font(.caption.weight(.semibold))
+                                                            .foregroundStyle(FormaTheme.Colors.primaryText)
+                                                            .lineLimit(1)
+                                                    }
+                                                    Text(item.detail)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                        .lineLimit(2)
+                                                }
+                                                Spacer(minLength: 0)
+                                            }
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color.primary.opacity(0.04))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                            }
 
                             if let exportErrorMessage {
                                 FormaBanner(message: exportErrorMessage, style: .error)
@@ -237,7 +325,374 @@ struct LegalPrivacySheet: View {
                     LgpdShareActivitySheet(activityItems: [url])
                 }
             }
+            .task(id: authManager.currentUserId) {
+                await loadAccountLogs()
+            }
         }
+    }
+
+    @ViewBuilder
+    private func logMetricChip(title: String, count: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(count)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FormaTheme.Colors.primaryText)
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func isLegacyOrOfflineFallbackError(_ error: Error) -> Bool {
+        if let apiError = error as? FormaAPIError {
+            switch apiError {
+            case .unreachableServer:
+                return true
+            case .serverError(let statusCode, let message):
+                return statusCode == 404 || message.localizedCaseInsensitiveContains("No static resource")
+            default:
+                break
+            }
+        }
+        return error.localizedDescription.localizedCaseInsensitiveContains("No static resource")
+    }
+
+    private func loadAccountLogs() async {
+        guard authManager.isAuthenticated else {
+            logCounts = (0, 0, 0, 0)
+            logPreviewItems = []
+            fallbackNoticeMessage = nil
+            return
+        }
+        isLoadingLogs = true
+        exportErrorMessage = nil
+        defer { isLoadingLogs = false }
+
+        do {
+            let data = try await FormaAPIClient.shared.requestData(
+                path: "/api/privacy/export",
+                method: "GET",
+                authenticated: true,
+                timeout: 18.0
+            )
+            if parseServerExportForPreview(data) {
+                fallbackNoticeMessage = nil
+            }
+        } catch {
+            if isLegacyOrOfflineFallbackError(error) {
+                _ = await pullAndBuildLocalFallbackPayload()
+                fallbackNoticeMessage = "Exibindo registros sincronizados no dispositivo (atualização da nuvem em andamento)."
+            } else {
+                exportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    @discardableResult
+    private func parseServerExportForPreview(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        let consentsObj = root["consents"] as? [String: Any]
+        let consentHistory = consentsObj?["history"] as? [[String: Any]] ?? []
+        let mciLogs = root["mciAccessLogs"] as? [[String: Any]] ?? []
+        let aiLogs = root["recentAiRequestAudit"] as? [[String: Any]] ?? []
+        let activityLogs = root["activityLogs"] as? [[String: Any]] ?? []
+
+        logCounts = (
+            consents: consentHistory.count,
+            accesses: mciLogs.count,
+            aiCalls: aiLogs.count,
+            activities: activityLogs.count
+        )
+
+        var items: [PrivacyLogPreviewItem] = []
+
+        for entry in consentHistory {
+            let id = (entry["id"] as? String) ?? UUID().uuidString
+            let type = (entry["consentType"] as? String) ?? "CONSENT"
+            let granted = (entry["granted"] as? Bool) ?? false
+            let version = (entry["documentVersion"] as? String) ?? ""
+            let date = parseIsoDate(entry["recordedAtUtc"]) ?? Date.distantPast
+            items.append(PrivacyLogPreviewItem(
+                id: "consent-\(id)",
+                badge: "LGPD",
+                title: "\(type) (\(granted ? "Autorizado" : "Revogado"))",
+                detail: "\(formatShortDate(date)) • Versão \(version)",
+                icon: "checkmark.shield.fill",
+                sortDate: date
+            ))
+        }
+
+        for entry in mciLogs {
+            let id = (entry["id"] as? String) ?? UUID().uuidString
+            let eventType = (entry["eventType"] as? String) ?? "ACCESS"
+            let date = parseIsoDate(entry["accessedAtUtc"]) ?? Date.distantPast
+            items.append(PrivacyLogPreviewItem(
+                id: "mci-\(id)",
+                badge: "MCI",
+                title: eventType,
+                detail: "\(formatShortDate(date)) • Retenção 180 dias (IP cifrado)",
+                icon: "network.badge.shield.half.filled",
+                sortDate: date
+            ))
+        }
+
+        for entry in aiLogs {
+            let id = (entry["id"] as? String) ?? UUID().uuidString
+            let endpoint = (entry["endpoint"] as? String) ?? "/api/ai"
+            let status = (entry["status"] as? String) ?? "OK"
+            let durationMs = (entry["durationMs"] as? Int) ?? 0
+            let date = parseIsoDate(entry["createdAt"]) ?? Date.distantPast
+            items.append(PrivacyLogPreviewItem(
+                id: "ai-\(id)",
+                badge: "IA",
+                title: "\(endpoint) • \(status)",
+                detail: "\(formatShortDate(date)) • \(durationMs) ms",
+                icon: "sparkles",
+                sortDate: date
+            ))
+        }
+
+        for entry in activityLogs {
+            let id = (entry["id"] as? String) ?? UUID().uuidString
+            let title = (entry["title"] as? String) ?? "Atividade"
+            let details = (entry["details"] as? String) ?? ""
+            let date = parseIsoDate(entry["timestamp"]) ?? Date.distantPast
+            let detailText = details.isEmpty ? formatShortDate(date) : "\(formatShortDate(date)) • \(details)"
+            items.append(PrivacyLogPreviewItem(
+                id: "act-\(id)",
+                badge: "ATIVIDADE",
+                title: title,
+                detail: detailText,
+                icon: "list.bullet.rectangle",
+                sortDate: date
+            ))
+        }
+
+        items.sort { $0.sortDate > $1.sortDate }
+        logPreviewItems = Array(items.prefix(6))
+        return true
+    }
+
+    private func pullAndBuildLocalFallbackPayload() async -> [String: Any] {
+        var remoteConsentCount = aiConsent.hasGrantedConsent ? 1 : 0
+        if let userId = authManager.currentUserId, !userId.isEmpty {
+            let encodedUserId = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId
+            if let pullData = try? await FormaAPIClient.shared.requestData(
+                path: "/api/sync/pull?userId=\(encodedUserId)",
+                method: "GET",
+                authenticated: true,
+                timeout: 15.0,
+                interceptAccountStatus: false
+            ),
+               let pullJson = try? JSONSerialization.jsonObject(with: pullData) as? [String: Any],
+               let remoteLogs = pullJson["activityLogs"] as? [[String: Any]] {
+                var records: [ActivityLogRecord] = []
+                for l in remoteLogs {
+                    guard let id = l["id"] as? String else { continue }
+                    let timestamp = parseIsoDate(l["timestamp"]) ?? Date()
+                    records.append(ActivityLogRecord(
+                        id: id,
+                        timestamp: timestamp,
+                        category: (l["category"] as? String) ?? "activity",
+                        title: (l["title"] as? String) ?? "",
+                        isSnack: l["isSnack"] as? Bool,
+                        caloriesChange: (l["caloriesChange"] as? Double) ?? 0.0,
+                        proteinGrams: l["proteinGrams"] as? Double,
+                        carbsGrams: l["carbsGrams"] as? Double,
+                        fatGrams: l["fatGrams"] as? Double,
+                        waterMilliliters: l["waterMilliliters"] as? Int,
+                        weightKg: l["weightKg"] as? Double,
+                        details: l["details"] as? String
+                    ))
+                }
+                if !records.isEmpty {
+                    AppActivityLogManager.shared.mergeRemoteRecords(records)
+                }
+            }
+
+            if let consentData = try? await FormaAPIClient.shared.requestData(
+                path: "/api/privacy/consents",
+                method: "GET",
+                authenticated: true,
+                timeout: 10.0,
+                interceptAccountStatus: false
+            ),
+               let consentJson = try? JSONSerialization.jsonObject(with: consentData) as? [String: Any],
+               let history = consentJson["history"] as? [[String: Any]] {
+                remoteConsentCount = max(remoteConsentCount, history.count)
+            }
+        }
+
+        let profiles = (try? modelContext.fetch(FetchDescriptor<Profile>())) ?? []
+        let foods = (try? modelContext.fetch(FetchDescriptor<FoodEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        let workouts = (try? modelContext.fetch(FetchDescriptor<WorkoutEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        let routines = (try? modelContext.fetch(FetchDescriptor<WorkoutRoutine>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)]))) ?? []
+        let waters = (try? modelContext.fetch(FetchDescriptor<WaterEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        let weights = (try? modelContext.fetch(FetchDescriptor<WeightEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        let activityRecords = AppActivityLogManager.shared.getAllRecords().sorted { $0.timestamp > $1.timestamp }
+
+        logCounts = (
+            consents: remoteConsentCount,
+            accesses: 0,
+            aiCalls: 0,
+            activities: activityRecords.count
+        )
+
+        var previews: [PrivacyLogPreviewItem] = activityRecords.prefix(6).map { rec in
+            let date = parseIsoDate(rec.timestamp) ?? Date.distantPast
+            let detail = (rec.details ?? "").isEmpty ? formatShortDate(date) : "\(formatShortDate(date)) • \(rec.details ?? "")"
+            return PrivacyLogPreviewItem(
+                id: "local-act-\(rec.id)",
+                badge: rec.category.uppercased(),
+                title: rec.title,
+                detail: detail,
+                icon: "list.bullet.rectangle",
+                sortDate: date
+            )
+        }
+        previews.sort { $0.sortDate > $1.sortDate }
+        logPreviewItems = Array(previews.prefix(6))
+
+        let isoFormatter = ISO8601DateFormatter()
+        let profileDict: Any = profiles.first.map { p in
+            [
+                "nome": p.nome,
+                "email": p.email,
+                "goal": p.goalRaw,
+                "currentWeightKg": p.currentWeight,
+                "targetWeightKg": p.targetWeight,
+                "heightMeters": p.height,
+                "targetCalorieIntake": p.targetCalorieIntake,
+                "targetCalorieBurn": p.targetCalorieBurn,
+                "targetProtein": p.targetProtein,
+                "targetCarbohydrates": p.targetCarbohydrates,
+                "targetFat": p.targetFat,
+                "targetWaterMilliliters": p.targetWaterMilliliters,
+                "biologicalSex": p.biologicalSex.rawValue
+            ] as [String: Any]
+        } ?? NSNull()
+
+        let activityDictionaries: [[String: Any]] = activityRecords.map { rec in
+            var dict: [String: Any] = [
+                "id": rec.id,
+                "timestamp": rec.timestamp,
+                "category": rec.category,
+                "title": rec.title,
+                "caloriesChange": rec.caloriesChange
+            ]
+            if let isSnack = rec.isSnack { dict["isSnack"] = isSnack }
+            if let prot = rec.proteinGrams { dict["proteinGrams"] = prot }
+            if let carbs = rec.carbsGrams { dict["carbsGrams"] = carbs }
+            if let fat = rec.fatGrams { dict["fatGrams"] = fat }
+            if let water = rec.waterMilliliters { dict["waterMilliliters"] = water }
+            if let weight = rec.weightKg { dict["weightKg"] = weight }
+            if let details = rec.details { dict["details"] = details }
+            return dict
+        }
+
+        return [
+            "exportSchema": "forma-lgpd-art18-portability-v1",
+            "exportSource": "ios-failsafe-sync-fallback",
+            "metadata": [
+                "application": "Forma — Nutrição & Treinos Inteligentes",
+                "exportedAtUtc": isoFormatter.string(from: Date()),
+                "policyVersion": "2026.11-LGPD",
+                "dpoContactEmail": "privacidade@forma.app"
+            ],
+            "account": [
+                "id": authManager.currentUserId ?? "",
+                "email": authManager.currentUserEmail ?? "",
+                "name": authManager.currentUserName ?? "",
+                "authProvider": authManager.currentAuthProvider ?? "",
+                "accountTier": authManager.accountTier.rawValue
+            ],
+            "consents": [
+                "aiConsentGranted": aiConsent.hasGrantedConsent,
+                "policyVersion": "2026.11-LGPD"
+            ],
+            "profile": profileDict,
+            "foods": foods.map { f in
+                [
+                    "id": f.id.uuidString,
+                    "name": f.name,
+                    "brand": f.brand,
+                    "mealType": f.mealTypeRaw,
+                    "portionGrams": f.portionGrams,
+                    "calories": f.calories,
+                    "protein": f.protein,
+                    "carbohydrates": f.carbohydrates,
+                    "fat": f.fat,
+                    "date": isoFormatter.string(from: f.date)
+                ]
+            },
+            "workouts": workouts.map { w in
+                [
+                    "id": w.id.uuidString,
+                    "title": w.title,
+                    "workoutType": w.workoutTypeRaw,
+                    "durationMinutes": w.durationMinutes,
+                    "caloriesBurned": w.caloriesBurned,
+                    "notes": w.notes,
+                    "date": isoFormatter.string(from: w.date)
+                ]
+            },
+            "routines": routines.map { r in
+                [
+                    "id": r.id.uuidString,
+                    "title": r.title,
+                    "workoutType": r.workoutTypeRaw,
+                    "targetMuscles": r.targetMuscles,
+                    "estimatedDurationMinutes": r.estimatedDurationMinutes,
+                    "estimatedCalories": r.estimatedCalories,
+                    "isFavorite": r.isFavorite,
+                    "createdAt": isoFormatter.string(from: r.createdAt)
+                ]
+            },
+            "waters": waters.map { wt in
+                [
+                    "id": wt.id.uuidString,
+                    "milliliters": wt.milliliters,
+                    "date": isoFormatter.string(from: wt.date)
+                ]
+            },
+            "weights": weights.map { wg in
+                [
+                    "id": wg.id.uuidString,
+                    "weight": wg.weight,
+                    "notes": wg.notes,
+                    "date": isoFormatter.string(from: wg.date)
+                ]
+            },
+            "activityLogs": activityDictionaries
+        ]
+    }
+
+    private func parseIsoDate(_ raw: Any?) -> Date? {
+        guard let str = raw as? String, !str.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = fractional.date(from: str) {
+            return parsed
+        }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: str)
+    }
+
+    private func formatShortDate(_ date: Date) -> String {
+        guard date != Date.distantPast else { return "—" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.dateFormat = "dd/MM HH:mm"
+        return formatter.string(from: date)
     }
 
     private func exportLgpdData() {
@@ -255,12 +710,32 @@ struct LegalPrivacySheet: View {
                     authenticated: true,
                     timeout: 20.0
                 )
+                _ = parseServerExportForPreview(data)
+                fallbackNoticeMessage = nil
                 let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("forma-dados-lgpd.json")
                 try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
                 exportedFileURL = fileURL
                 isExportingData = false
                 showExportShareSheet = true
             } catch {
+                if isLegacyOrOfflineFallbackError(error) {
+                    let fallbackPayload = await pullAndBuildLocalFallbackPayload()
+                    do {
+                        let fallbackData = try JSONSerialization.data(withJSONObject: fallbackPayload, options: [.prettyPrinted, .sortedKeys])
+                        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("forma-dados-lgpd.json")
+                        try fallbackData.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+                        exportedFileURL = fileURL
+                        fallbackNoticeMessage = "Arquivo gerado com os registros sincronizados no dispositivo."
+                        exportErrorMessage = nil
+                        isExportingData = false
+                        showExportShareSheet = true
+                        return
+                    } catch {
+                        isExportingData = false
+                        exportErrorMessage = error.localizedDescription
+                        return
+                    }
+                }
                 isExportingData = false
                 exportErrorMessage = error.localizedDescription
             }

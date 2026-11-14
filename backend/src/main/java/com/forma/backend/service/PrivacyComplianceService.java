@@ -4,6 +4,7 @@ import com.forma.backend.dto.PrivacyDto;
 import com.forma.backend.dto.SyncDto;
 import com.forma.backend.entity.AiRequestLogEntity;
 import com.forma.backend.entity.LegalConsentLedgerEntity;
+import com.forma.backend.entity.MciAccessLogEntity;
 import com.forma.backend.entity.User;
 import com.forma.backend.entity.UserProfile;
 import com.forma.backend.repository.*;
@@ -35,6 +36,8 @@ public class PrivacyComplianceService {
     private final WeightEntryRepository weightEntryRepository;
     private final AiAnalysisRepository aiAnalysisRepository;
     private final AiRequestLogRepository aiRequestLogRepository;
+    private final UserActivityLogRepository userActivityLogRepository;
+    private final MciAccessLogRepository mciAccessLogRepository;
     private final LegalConsentLedgerRepository legalConsentLedgerRepository;
     private final FieldEncryptionService fieldEncryptionService;
     private final MciAccessLogService mciAccessLogService;
@@ -51,6 +54,8 @@ public class PrivacyComplianceService {
         WeightEntryRepository weightEntryRepository,
         AiAnalysisRepository aiAnalysisRepository,
         AiRequestLogRepository aiRequestLogRepository,
+        UserActivityLogRepository userActivityLogRepository,
+        MciAccessLogRepository mciAccessLogRepository,
         LegalConsentLedgerRepository legalConsentLedgerRepository,
         FieldEncryptionService fieldEncryptionService,
         MciAccessLogService mciAccessLogService
@@ -64,6 +69,8 @@ public class PrivacyComplianceService {
         this.weightEntryRepository = weightEntryRepository;
         this.aiAnalysisRepository = aiAnalysisRepository;
         this.aiRequestLogRepository = aiRequestLogRepository;
+        this.userActivityLogRepository = userActivityLogRepository;
+        this.mciAccessLogRepository = mciAccessLogRepository;
         this.legalConsentLedgerRepository = legalConsentLedgerRepository;
         this.fieldEncryptionService = fieldEncryptionService;
         this.mciAccessLogService = mciAccessLogService;
@@ -221,8 +228,21 @@ public class PrivacyComplianceService {
         accountData.put("lastLoginAt", user.getLastLoginAt());
         accountData.put("lastSyncedAt", user.getLastSyncedAt());
 
-        List<Map<String, Object>> aiUsageLogs = aiRequestLogRepository.findTop15ByUserIdOrderByCreatedAtDesc(userId).stream()
+        List<Map<String, Object>> aiUsageLogs = aiRequestLogRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
             .map(this::toExportAiLogMap)
+            .toList();
+
+        List<SyncDto.ActivityLogDto> activityLogs = userActivityLogRepository
+            .findByUserIdOrderByActivityTimestampDesc(userId)
+            .stream()
+            .map(SyncDto.ActivityLogDto::fromEntity)
+            .toList();
+
+        String accountRefHash = fieldEncryptionService.hmacSha256Hex(userId.toString().toLowerCase());
+        List<Map<String, Object>> mciLogs = mciAccessLogRepository
+            .findByAccountRefHashOrderByAccessedAtUtcDesc(accountRefHash)
+            .stream()
+            .map(this::toExportMciLogMap)
             .toList();
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -237,6 +257,8 @@ public class PrivacyComplianceService {
         payload.put("waters", waterEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream().map(SyncDto.WaterDto::fromEntity).toList());
         payload.put("weights", weightEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream().map(SyncDto.WeightDto::fromEntity).toList());
         payload.put("aiAnalyses", aiAnalysisRepository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(SyncDto.AiAnalysisDto::fromEntity).toList());
+        payload.put("activityLogs", activityLogs);
+        payload.put("mciAccessLogs", mciLogs);
         payload.put("recentAiRequestAudit", aiUsageLogs);
         return payload;
     }
@@ -248,6 +270,15 @@ public class PrivacyComplianceService {
         m.put("status", log.getStatus());
         m.put("durationMs", log.getDurationMs());
         m.put("createdAt", log.getCreatedAt());
+        return m;
+    }
+
+    private Map<String, Object> toExportMciLogMap(MciAccessLogEntity log) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", log.getId());
+        m.put("eventType", log.getEventType());
+        m.put("accessedAtUtc", log.getAccessedAtUtc());
+        m.put("retainUntilUtc", log.getRetainUntilUtc());
         return m;
     }
 

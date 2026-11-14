@@ -184,6 +184,9 @@ class SecurityAndLgpdComplianceIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.account.email").value("portabilidade@forma.app"))
             .andExpect(jsonPath("$.consents.history").isArray())
+            .andExpect(jsonPath("$.activityLogs").isArray())
+            .andExpect(jsonPath("$.mciAccessLogs").isArray())
+            .andExpect(jsonPath("$.mciAccessLogs[0].eventType").isNotEmpty())
             .andReturn();
         assertThat(exportRes.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION))
             .contains("forma-dados-lgpd-");

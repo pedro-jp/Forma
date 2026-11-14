@@ -12,6 +12,7 @@ import java.util.UUID;
 public interface AiRequestLogRepository extends JpaRepository<AiRequestLogEntity, UUID> {
     List<AiRequestLogEntity> findTop50ByOrderByCreatedAtDesc();
     List<AiRequestLogEntity> findTop15ByUserIdOrderByCreatedAtDesc(UUID userId);
+    List<AiRequestLogEntity> findByUserIdOrderByCreatedAtDesc(UUID userId);
     long countByStatus(String status);
     long countByUserId(UUID userId);
     long countByUserIdAndCreatedAtAfter(UUID userId, Instant after);
