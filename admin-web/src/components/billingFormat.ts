@@ -6,17 +6,24 @@ export function formatBRLFromCents(cents: number | null | undefined): string {
   }).format(safe / 100);
 }
 
-export function formatDateTimeBR(iso?: string | null): string {
+export function formatTimestampMsBR(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('pt-BR', {
+  const base = d.toLocaleString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    second: '2-digit'
   });
+  const ms = d.getMilliseconds().toString().padStart(3, '0');
+  return `${base.replace(',', '')}.${ms}`;
+}
+
+export function formatDateTimeBR(iso?: string | null): string {
+  return formatTimestampMsBR(iso);
 }
 
 export function formatShortDateBR(iso?: string | null): string {
@@ -30,40 +37,89 @@ export function formatShortDateBR(iso?: string | null): string {
   });
 }
 
-export function subscriptionStatusMeta(status: string): { label: string; color: string; bg: string } {
+export type PillTone = 'pos' | 'warn' | 'neg' | 'neutral';
+
+export function subscriptionStatusMeta(status: string): { label: string; tone: PillTone } {
   const upper = (status || '').toUpperCase();
   switch (upper) {
     case 'ACTIVE':
-      return { label: 'Ativa', color: '#34d399', bg: 'rgba(16, 185, 129, 0.14)' };
+      return { label: 'Ativa', tone: 'pos' };
     case 'TRIALING':
-      return { label: 'Período Grátis', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.14)' };
+      return { label: 'Período grátis', tone: 'pos' };
     case 'PAST_DUE':
-      return { label: 'Em Atraso', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.16)' };
+      return { label: 'Em atraso', tone: 'warn' };
     case 'PAUSED':
-      return { label: 'Pausada', color: '#fb923c', bg: 'rgba(249, 115, 22, 0.15)' };
+      return { label: 'Pausada', tone: 'warn' };
     case 'CANCELED':
-      return { label: 'Cancelada', color: '#f87171', bg: 'rgba(239, 68, 68, 0.14)' };
+      return { label: 'Cancelada', tone: 'neg' };
     case 'EXPIRED':
-      return { label: 'Expirada', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.14)' };
+      return { label: 'Expirada', tone: 'neutral' };
     default:
-      return { label: status || 'Free', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
+      return { label: status || 'Free', tone: 'neutral' };
   }
 }
 
-export function entryStatusMeta(status: string): { label: string; color: string; bg: string } {
+export function entryStatusMeta(status: string): { label: string; tone: PillTone } {
   const upper = (status || '').toUpperCase();
   switch (upper) {
     case 'PAID':
-      return { label: 'Pago', color: '#34d399', bg: 'rgba(16, 185, 129, 0.14)' };
+      return { label: 'Pago', tone: 'pos' };
     case 'PENDING':
-      return { label: 'Pendente', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.14)' };
+      return { label: 'Pendente', tone: 'warn' };
     case 'OVERDUE':
-      return { label: 'Vencida', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.16)' };
+      return { label: 'Vencida', tone: 'warn' };
     case 'REFUNDED':
-      return { label: 'Estornada', color: '#c084fc', bg: 'rgba(139, 92, 246, 0.16)' };
+      return { label: 'Estornada', tone: 'neutral' };
     case 'CANCELED':
-      return { label: 'Cancelada', color: '#f87171', bg: 'rgba(239, 68, 68, 0.14)' };
+      return { label: 'Cancelada', tone: 'neg' };
     default:
-      return { label: upper || '—', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
+      return { label: upper || '—', tone: 'neutral' };
+  }
+}
+
+export function couponTypeLabel(couponType: string): string {
+  switch ((couponType || '').toUpperCase()) {
+    case 'FREE_PERIOD_DAYS':
+      return 'Período grátis';
+    case 'PERCENT_DISCOUNT':
+      return 'Desconto percentual';
+    case 'FIXED_CENTS_DISCOUNT':
+      return 'Desconto fixo';
+    default:
+      return couponType;
+  }
+}
+
+export function subscriptionSourceLabel(source: string): string {
+  switch ((source || '').toUpperCase()) {
+    case 'APPLE_STOREKIT':
+      return 'App Store';
+    case 'COUPON_FREE_PERIOD':
+      return 'Cupom promocional';
+    case 'EXTERNAL_GATEWAY':
+      return 'Gateway externo';
+    case 'ADMIN_MANUAL':
+      return 'Ativação manual';
+    case 'NONE':
+      return 'Sem assinatura';
+    default:
+      return source || '—';
+  }
+}
+
+export function paymentMethodLabel(method: string): string {
+  switch ((method || '').toUpperCase()) {
+    case 'APPLE_IAP':
+      return 'App Store';
+    case 'PIX':
+      return 'Pix';
+    case 'CARD':
+      return 'Cartão';
+    case 'COUPON':
+      return 'Cupom';
+    case 'COURTESY':
+      return 'Cortesia';
+    default:
+      return method || '—';
   }
 }

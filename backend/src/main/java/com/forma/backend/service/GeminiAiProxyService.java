@@ -402,7 +402,7 @@ public class GeminiAiProxyService {
     private String callGeminiWithFailover(String prompt, String imageBase64, String imageMimeType) throws Exception {
         String apiKey = appConfigService.getGeminiApiKey();
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("Chave de API do Gemini não configurada no Painel de Administração.");
+            throw new IllegalStateException("Serviço de inteligência artificial temporariamente indisponível.");
         }
 
         Set<String> modelsToTry = new LinkedHashSet<>();

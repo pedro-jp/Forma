@@ -21,6 +21,14 @@ public struct SubscriptionPlanItem: Codable, Identifiable, Equatable {
     public let currency: String
     public let defaultTrialDays: Int
     public let active: Bool
+    public let updatedAtUtc: String?
+}
+
+public struct LiveBillingCatalogResponse: Codable, Equatable {
+    public let plans: [SubscriptionPlanItem]
+    public let graceDays: Int
+    public let overdueActionPolicy: String
+    public let serverTimestampUtc: String?
 }
 
 public struct CouponValidationInfo: Codable, Equatable {
@@ -58,6 +66,11 @@ public struct UserSubscriptionStatusInfo: Codable, Equatable {
     public let priceCents: Int
     public let currency: String
     public let appliedCouponCode: String?
+    public let nextBillingDiscountPercent: Int?
+    public let nextBillingDiscountCents: Int?
+    public let nextBillingCouponCode: String?
+    public let nextBillingPriceCents: Int?
+    public let nextBillingDiscountLabel: String?
     public let autoRenew: Bool
     public let externalTransactionId: String?
     public let currentPeriodStartUtc: String?
@@ -94,6 +107,11 @@ public final class SubscriptionManager: ObservableObject {
     ]
 
     @Published public private(set) var plans: [SubscriptionPlanItem] = []
+    @Published public private(set) var catalogGraceDays: Int = 3
+    @Published public private(set) var catalogOverduePolicy: String = "PAUSE"
+    @Published public private(set) var lastCatalogSyncAt: Date? = nil
+    @Published public private(set) var isRefreshingCatalog: Bool = false
+
     @Published public private(set) var storeKitProducts: [Product] = []
     @Published public private(set) var currentSubscription: UserSubscriptionStatusInfo? = nil
     @Published public private(set) var couponValidation: CouponValidationInfo? = nil
@@ -140,12 +158,49 @@ public final class SubscriptionManager: ObservableObject {
         realtimeWarningMessage ?? currentSubscription?.activeWarningMessage
     }
 
+    public var activeSubscribedPlanId: String? {
+        guard let planId = currentSubscription?.planId, !planId.isEmpty else {
+            return nil
+        }
+        let status = effectiveStatus
+        if status == "ACTIVE" || status == "TRIALING" {
+            return planId
+        }
+        return nil
+    }
+
+    public func isPlanCurrentlyActive(_ planId: String) -> Bool {
+        guard let activeId = activeSubscribedPlanId else { return false }
+        return activeId.caseInsensitiveCompare(planId) == .orderedSame
+    }
+
     private init() {
         self.updatesTask = Task.detached(priority: .background) {
             for await result in StoreKit.Transaction.updates {
                 guard case .verified(let transaction) = result else { continue }
                 await SubscriptionManager.shared.handleVerifiedTransaction(transaction, couponCode: nil)
             }
+        }
+    }
+
+    public static func localizedStatusLabel(_ rawStatus: String) -> String {
+        switch rawStatus.uppercased() {
+        case "ACTIVE":
+            return "Ativa"
+        case "TRIALING":
+            return "Período grátis"
+        case "PAST_DUE":
+            return "Pagamento pendente"
+        case "PAUSED":
+            return "Pausada"
+        case "CANCELED":
+            return "Cancelada"
+        case "EXPIRED":
+            return "Expirada"
+        case "FREE", "NONE":
+            return "Plano Essencial"
+        default:
+            return rawStatus
         }
     }
 
@@ -167,6 +222,11 @@ public final class SubscriptionManager: ObservableObject {
 
     public func purchase(product: Product, couponCode: String? = nil) async {
         guard !isPurchasing else { return }
+        if let matchedPlan = plans.first(where: { $0.storekitProductId == product.id }),
+           isPlanCurrentlyActive(matchedPlan.id) {
+            errorMessage = "Você já possui o plano \(matchedPlan.name) ativo no momento."
+            return
+        }
         isPurchasing = true
         errorMessage = nil
         successMessage = nil
@@ -180,10 +240,10 @@ public final class SubscriptionManager: ObservableObject {
                 case .verified(let transaction):
                     await handleVerifiedTransaction(transaction, couponCode: couponCode)
                     if errorMessage == nil {
-                        successMessage = "Assinatura Forma Pro ativada via StoreKit!"
+                        successMessage = "Assinatura Forma Pro ativada com sucesso."
                     }
                 case .unverified(_, let verificationError):
-                    errorMessage = "Transação StoreKit não pôde ser verificada: \(verificationError.localizedDescription)"
+                    errorMessage = "Não foi possível validar a compra: \(verificationError.localizedDescription)"
                 }
             case .userCancelled:
                 break
@@ -193,7 +253,7 @@ public final class SubscriptionManager: ObservableObject {
                 break
             }
         } catch {
-            errorMessage = "Não foi possível concluir a compra StoreKit: \(error.localizedDescription)"
+            errorMessage = "Não foi possível concluir a assinatura: \(error.localizedDescription)"
         }
     }
 
@@ -222,11 +282,11 @@ public final class SubscriptionManager: ObservableObject {
         await refreshMySubscription()
 
         if syncedAny {
-            successMessage = "Compras restauradas e sincronizadas com sucesso!"
+            successMessage = "Assinatura restaurada com sucesso."
         } else if AuthManager.shared.isPro {
             successMessage = "Sua assinatura Forma Pro está sincronizada."
         } else if errorMessage == nil {
-            errorMessage = "Nenhuma assinatura Apple ativa encontrada para restaurar."
+            errorMessage = "Nenhuma assinatura ativa encontrada nesta conta Apple."
         }
     }
 
@@ -238,6 +298,38 @@ public final class SubscriptionManager: ObservableObject {
     }
 
     // MARK: - Backend API
+
+    public func refreshAllBeforeDisplay() async {
+        isRefreshingCatalog = true
+        defer { isRefreshingCatalog = false }
+
+        async let catalogTask: Void = fetchLiveCatalog()
+        async let subscriptionTask: Void = refreshMySubscription()
+        async let storeKitTask: Void = loadStoreKitProducts()
+        _ = await (catalogTask, subscriptionTask, storeKitTask)
+    }
+
+    public func fetchLiveCatalog() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let data = try await FormaAPIClient.shared.requestData(
+                path: "/api/subscriptions/catalog",
+                method: "GET",
+                authenticated: AuthManager.shared.isAuthenticated,
+                timeout: 12.0,
+                interceptAccountStatus: false
+            )
+            let catalog = try decoder.decode(LiveBillingCatalogResponse.self, from: data)
+            self.plans = catalog.plans.filter { $0.active }
+            self.catalogGraceDays = catalog.graceDays > 0 ? catalog.graceDays : 3
+            self.catalogOverduePolicy = catalog.overdueActionPolicy.isEmpty ? "PAUSE" : catalog.overdueActionPolicy
+            self.lastCatalogSyncAt = Date()
+        } catch {
+            // Fallback compatível com versões antigas do endpoint
+            await fetchPlans()
+        }
+    }
 
     public func fetchPlans() async {
         isLoading = true
@@ -252,6 +344,7 @@ public final class SubscriptionManager: ObservableObject {
             )
             let fetched = try decoder.decode([SubscriptionPlanItem].self, from: data)
             self.plans = fetched.filter { $0.active }
+            self.lastCatalogSyncAt = Date()
         } catch {
             if plans.isEmpty {
                 errorMessage = (error as? FormaAPIError)?.errorDescription ?? error.localizedDescription
@@ -453,6 +546,7 @@ public final class SubscriptionManager: ObservableObject {
     }
 
     public func resetOnLogout() {
+        self.lastCatalogSyncAt = nil
         self.currentSubscription = nil
         self.couponValidation = nil
         self.errorMessage = nil

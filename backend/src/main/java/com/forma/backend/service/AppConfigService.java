@@ -5,11 +5,15 @@ import com.forma.backend.repository.AppConfigRepository;
 import com.forma.backend.security.FieldEncryptionService;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.security.SecureRandom;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AppConfigService {
@@ -37,6 +41,8 @@ public class AppConfigService {
 
     private final AppConfigRepository appConfigRepository;
     private final FieldEncryptionService encryptionService;
+    private final ConcurrentHashMap<String, String> decryptedCache = new ConcurrentHashMap<>();
+    private volatile boolean cacheLoaded = false;
 
     public AppConfigService(
         AppConfigRepository appConfigRepository,
@@ -60,22 +66,45 @@ public class AppConfigService {
         migrateSecretIfPlaintext(KEY_APPLE_PRIVATE_KEY);
         migrateSecretIfPlaintext(KEY_WEBHOOK_SECRET);
 
+        reloadCacheFromDb();
+
         if (getWebhookSecret().isBlank()) {
             rotateWebhookSecret();
         }
         if (!appConfigRepository.existsById(KEY_BILLING_OVERDUE_ACTION)) {
             appConfigRepository.save(new AppConfigEntity(KEY_BILLING_OVERDUE_ACTION, "PAUSE", "Ação automática após 3 dias de atraso (PAUSE ou CANCEL)"));
+            cachePutTransactionalSafe(KEY_BILLING_OVERDUE_ACTION, "PAUSE");
         }
 
         Optional<AppConfigEntity> modelEntity = appConfigRepository.findById(KEY_GEMINI_MODEL);
         if (modelEntity.isEmpty()) {
             appConfigRepository.save(new AppConfigEntity(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL, "Modelo ativo do Gemini"));
+            cachePutTransactionalSafe(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL);
         } else {
             String currentModel = modelEntity.get().getConfigValue();
             if (isDeprecatedModel(currentModel)) {
                 modelEntity.get().setConfigValue(DEFAULT_GEMINI_MODEL);
                 appConfigRepository.save(modelEntity.get());
+                cachePutTransactionalSafe(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL);
+            } else {
+                cachePutTransactionalSafe(KEY_GEMINI_MODEL, currentModel != null ? currentModel.trim() : DEFAULT_GEMINI_MODEL);
             }
+        }
+    }
+
+    public synchronized void reloadCacheFromDb() {
+        try {
+            List<AppConfigEntity> all = appConfigRepository.findAll();
+            if (all != null) {
+                for (AppConfigEntity entity : all) {
+                    if (entity == null || entity.getId() == null) continue;
+                    String key = entity.getId();
+                    decryptedCache.put(key, decryptIfSecret(key, entity.getConfigValue()));
+                }
+            }
+            cacheLoaded = true;
+        } catch (Exception ignored) {
+            cacheLoaded = false;
         }
     }
 
@@ -115,14 +144,15 @@ public class AppConfigService {
             .orElse(new AppConfigEntity(KEY_GEMINI_API_KEY, "", "Chave de API do Google Gemini"));
         entity.setConfigValue(clean.isEmpty() ? "" : encryptionService.encrypt(clean));
         appConfigRepository.saveAndFlush(entity);
+        cachePutTransactionalSafe(KEY_GEMINI_API_KEY, clean);
     }
 
     public String getGeminiModel() {
-        return appConfigRepository.findById(KEY_GEMINI_MODEL)
-            .map(AppConfigEntity::getConfigValue)
-            .map(String::trim)
-            .filter(v -> !v.isBlank() && !isDeprecatedModel(v))
-            .orElse(DEFAULT_GEMINI_MODEL);
+        String cached = readDecryptedDbValue(KEY_GEMINI_MODEL);
+        if (!cached.isBlank() && !isDeprecatedModel(cached)) {
+            return cached;
+        }
+        return DEFAULT_GEMINI_MODEL;
     }
 
     public void setGeminiModel(String model) {
@@ -131,20 +161,21 @@ public class AppConfigService {
             .orElse(new AppConfigEntity(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL, "Modelo ativo do Gemini"));
         entity.setConfigValue(finalModel);
         appConfigRepository.save(entity);
+        cachePutTransactionalSafe(KEY_GEMINI_MODEL, finalModel);
     }
 
     public boolean isAiBlocked() {
-        return appConfigRepository.findById(KEY_AI_BLOCKED)
-            .map(AppConfigEntity::getConfigValue)
-            .map(v -> "true".equalsIgnoreCase(v.trim()))
-            .orElse(false);
+        String cached = readDecryptedDbValue(KEY_AI_BLOCKED);
+        return "true".equalsIgnoreCase(cached);
     }
 
     public void setAiBlocked(boolean blocked) {
         AppConfigEntity entity = appConfigRepository.findById(KEY_AI_BLOCKED)
             .orElse(new AppConfigEntity(KEY_AI_BLOCKED, "false", "Bloqueio global de requisições de IA"));
-        entity.setConfigValue(blocked ? "true" : "false");
+        String val = blocked ? "true" : "false";
+        entity.setConfigValue(val);
         appConfigRepository.save(entity);
+        cachePutTransactionalSafe(KEY_AI_BLOCKED, val);
     }
 
     public String getMaskedApiKey() {
@@ -197,13 +228,12 @@ public class AppConfigService {
             .orElse(new AppConfigEntity(KEY_WEBHOOK_SECRET, "", "Segredo HMAC-SHA256 dos Webhooks de Cobrança"));
         e.setConfigValue(encryptionService.encrypt(nextSecret));
         appConfigRepository.saveAndFlush(e);
+        cachePutTransactionalSafe(KEY_WEBHOOK_SECRET, nextSecret);
         return nextSecret;
     }
 
     public String getBillingOverdueAction() {
-        String val = appConfigRepository.findById(KEY_BILLING_OVERDUE_ACTION)
-            .map(AppConfigEntity::getConfigValue)
-            .orElse("PAUSE")
+        String val = readDecryptedDbValue(KEY_BILLING_OVERDUE_ACTION)
             .trim()
             .toUpperCase();
         return "CANCEL".equals(val) ? "CANCEL" : "PAUSE";
@@ -215,20 +245,25 @@ public class AppConfigService {
             .orElse(new AppConfigEntity(KEY_BILLING_OVERDUE_ACTION, "PAUSE", "Ação automática após 3 dias de atraso (PAUSE ou CANCEL)"));
         e.setConfigValue(normalized);
         appConfigRepository.saveAndFlush(e);
+        cachePutTransactionalSafe(KEY_BILLING_OVERDUE_ACTION, normalized);
     }
 
     public void setAppleAuthConfig(String teamId, String keyId, String privateKeyPem) {
         if (teamId != null) {
+            String cleanTeam = teamId.trim();
             AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_TEAM_ID)
                 .orElse(new AppConfigEntity(KEY_APPLE_TEAM_ID, DEFAULT_APPLE_TEAM_ID, "Apple Team ID"));
-            e.setConfigValue(teamId.trim());
+            e.setConfigValue(cleanTeam);
             appConfigRepository.save(e);
+            cachePutTransactionalSafe(KEY_APPLE_TEAM_ID, cleanTeam);
         }
         if (keyId != null) {
+            String cleanKey = keyId.trim();
             AppConfigEntity e = appConfigRepository.findById(KEY_APPLE_KEY_ID)
                 .orElse(new AppConfigEntity(KEY_APPLE_KEY_ID, "", "Apple Sign-In Key ID"));
-            e.setConfigValue(keyId.trim());
+            e.setConfigValue(cleanKey);
             appConfigRepository.save(e);
+            cachePutTransactionalSafe(KEY_APPLE_KEY_ID, cleanKey);
         }
         if (privateKeyPem != null) {
             String clean = privateKeyPem.trim();
@@ -236,14 +271,27 @@ public class AppConfigService {
                 .orElse(new AppConfigEntity(KEY_APPLE_PRIVATE_KEY, "", "Apple Sign-In .p8 Private Key"));
             e.setConfigValue(clean.isEmpty() ? "" : encryptionService.encrypt(clean));
             appConfigRepository.save(e);
+            cachePutTransactionalSafe(KEY_APPLE_PRIVATE_KEY, clean);
         }
     }
 
     private String readDecryptedDbValue(String key) {
-        String dbValue = appConfigRepository.findById(key)
-            .map(AppConfigEntity::getConfigValue)
-            .orElse("")
-            .trim();
+        if (!cacheLoaded) {
+            reloadCacheFromDb();
+        }
+        String cached = decryptedCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        String plain = appConfigRepository.findById(key)
+            .map(e -> decryptIfSecret(key, e.getConfigValue()))
+            .orElse("");
+        decryptedCache.put(key, plain);
+        return plain;
+    }
+
+    private String decryptIfSecret(String key, String rawValue) {
+        String dbValue = rawValue != null ? rawValue.trim() : "";
         if (dbValue.isEmpty()) {
             return "";
         }
@@ -251,6 +299,29 @@ public class AppConfigService {
             return encryptionService.decrypt(dbValue).trim();
         }
         return dbValue;
+    }
+
+    private void cachePutTransactionalSafe(String key, String plainValue) {
+        String nextVal = plainValue != null ? plainValue : "";
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            boolean hadPrev = decryptedCache.containsKey(key);
+            String prev = decryptedCache.get(key);
+            decryptedCache.put(key, nextVal);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != STATUS_COMMITTED) {
+                        if (hadPrev && prev != null) {
+                            decryptedCache.put(key, prev);
+                        } else {
+                            decryptedCache.remove(key);
+                        }
+                    }
+                }
+            });
+        } else {
+            decryptedCache.put(key, nextVal);
+        }
     }
 
     private String getConfigOrEnv(String key, String fallback) {

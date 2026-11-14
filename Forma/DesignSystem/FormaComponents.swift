@@ -91,7 +91,7 @@ struct FormaScreenHeader<Trailing: View>: View {
 struct FormaBadge: View {
     let text: String
     var icon: String? = nil
-    var tint: Color = FormaTheme.Colors.brand
+    var tint: Color = FormaTheme.Colors.brandInk
 
     var body: some View {
         HStack(spacing: 4) {
@@ -107,7 +107,7 @@ struct FormaBadge: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(tint.opacity(0.13))
+        .background(tint.opacity(0.14))
         .clipShape(Capsule())
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -462,13 +462,13 @@ struct FormaDualEnergyRing: View {
             if consumedDiff > 0 {
                 Text("Faltam \(Int(consumedDiff.rounded())) kcal")
                     .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(FormaTheme.Colors.brand)
+                    .foregroundStyle(FormaTheme.Colors.brandInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             } else {
                 Text("Superávit batido! 🔥")
                     .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .foregroundStyle(FormaTheme.Colors.brandInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -476,13 +476,13 @@ struct FormaDualEnergyRing: View {
             if consumedDiff > 0 {
                 Text("Restam \(Int(consumedDiff.rounded())) kcal")
                     .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .foregroundStyle(FormaTheme.Colors.brandInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             } else {
                 Text("Meta atingida! ⚡️")
                     .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                    .foregroundStyle(FormaTheme.Colors.brandInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }

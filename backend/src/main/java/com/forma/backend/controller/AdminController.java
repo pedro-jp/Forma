@@ -1,6 +1,8 @@
 package com.forma.backend.controller;
 
 import com.forma.backend.dto.AdminDto;
+import com.forma.backend.dto.BillingDto;
+import com.forma.backend.entity.AdminAuditLogEntity;
 import com.forma.backend.entity.SecurityIncidentLogEntity;
 import com.forma.backend.exception.DomainExceptions.InvalidCredentialsException;
 import com.forma.backend.repository.*;
@@ -9,16 +11,19 @@ import com.forma.backend.service.AdminUserService;
 import com.forma.backend.service.AppConfigService;
 import com.forma.backend.service.JwtService;
 import com.forma.backend.service.MciAccessLogService;
+import com.forma.backend.service.SubscriptionBillingService;
 import com.forma.backend.websocket.AdminEventPublisherService;
 import com.forma.backend.websocket.UserAccountWebSocketHandler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -36,11 +41,22 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
+
+    private static final ExecutorService ADMIN_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Semaphore ADMIN_CONCURRENCY = new Semaphore(8);
+
+    @Autowired(required = false)
+    private SubscriptionBillingService subscriptionBillingService;
 
     private final UserRepository userRepository;
     private final FoodEntryRepository foodEntryRepository;
@@ -146,7 +162,7 @@ public class AdminController {
             "status", "authenticated",
             "username", configuredAdminUsername,
             "token", adminToken,
-            "message", "Login realizado com sucesso!"
+            "message", "Sessão autenticada."
         ));
     }
 
@@ -198,7 +214,8 @@ public class AdminController {
                 inc.setMitigationActions("IP bloqueado por 10 minutos; trilha registrada em admin_audit_logs.");
                 inc.setDetectedAtUtc(Instant.now());
                 inc.setRetainUntilUtc(Instant.now().plus(1825, ChronoUnit.DAYS));
-                securityIncidentLogRepository.save(inc);
+                SecurityIncidentLogEntity savedInc = securityIncidentLogRepository.save(inc);
+                adminEventPublisherService.publishSecurityIncident(savedInc);
             } catch (Exception ignored) {
             }
         }
@@ -244,25 +261,88 @@ public class AdminController {
         @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
     ) {
         authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0")
+            .body(buildOverviewResponse());
+    }
 
-        List<AdminDto.UserSummaryDto> recentUsers = adminUserService.listAllUsers();
-        List<AdminDto.AiLogSummaryDto> recentLogs = aiRequestLogRepository.findTop50ByOrderByCreatedAtDesc()
-            .stream()
-            .map(AdminDto.AiLogSummaryDto::fromEntity)
-            .toList();
+    @GetMapping("/bootstrap")
+    public ResponseEntity<AdminDto.AdminBootstrapResponse> getBootstrap(
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
 
-        return ResponseEntity.ok(new AdminDto.AdminOverviewResponse(
-            userRepository.count(),
-            foodEntryRepository.count(),
-            workoutEntryRepository.count(),
-            aiRequestLogRepository.count(),
+        CompletableFuture<AdminDto.AdminOverviewResponse> overviewFut = supplyParallelOrInline(this::buildOverviewResponse);
+        CompletableFuture<BillingDto.BillingDashboardResponse> billingFut = supplyParallelOrInline(
+            () -> subscriptionBillingService != null ? subscriptionBillingService.getAdminDashboard(null) : null
+        );
+        CompletableFuture<List<AdminAuditLogEntity>> auditsFut = supplyParallelOrInline(
+            () -> adminAuditLogRepository.findTop100ByOrderByCreatedAtUtcDesc().stream().limit(25).toList()
+        );
+        CompletableFuture<List<SecurityIncidentLogEntity>> incidentsFut = supplyParallelOrInline(
+            () -> securityIncidentLogRepository.findTop50ByOrderByDetectedAtUtcDesc().stream().limit(15).toList()
+        );
+
+        CompletableFuture.allOf(overviewFut, billingFut, auditsFut, incidentsFut).join();
+
+        AdminDto.AdminBootstrapResponse response = new AdminDto.AdminBootstrapResponse(
+            configuredAdminUsername,
+            overviewFut.join(),
+            billingFut.join(),
+            auditsFut.join(),
+            incidentsFut.join(),
+            Instant.now()
+        );
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0")
+            .body(response);
+    }
+
+    private AdminDto.AdminOverviewResponse buildOverviewResponse() {
+        CompletableFuture<List<AdminDto.UserSummaryDto>> usersFut = supplyParallelOrInline(adminUserService::listAllUsers);
+        CompletableFuture<List<AdminDto.AiLogSummaryDto>> logsFut = supplyParallelOrInline(
+            () -> aiRequestLogRepository.findTop50ByOrderByCreatedAtDesc()
+                .stream()
+                .map(AdminDto.AiLogSummaryDto::fromEntity)
+                .toList()
+        );
+        CompletableFuture<Long> totalAiFut = supplyParallelOrInline(aiRequestLogRepository::count);
+
+        CompletableFuture.allOf(usersFut, logsFut, totalAiFut).join();
+
+        List<AdminDto.UserSummaryDto> recentUsers = usersFut.join();
+        long totalUsers = recentUsers.size();
+        long totalFoods = recentUsers.stream().mapToLong(AdminDto.UserSummaryDto::foodsCount).sum();
+        long totalWorkouts = recentUsers.stream().mapToLong(AdminDto.UserSummaryDto::workoutsCount).sum();
+
+        return new AdminDto.AdminOverviewResponse(
+            totalUsers,
+            totalFoods,
+            totalWorkouts,
+            totalAiFut.join(),
             appConfigService.getMaskedApiKey(),
             !appConfigService.getGeminiApiKey().isBlank(),
             appConfigService.getGeminiModel(),
             appConfigService.isAiBlocked(),
             recentUsers,
-            recentLogs
-        ));
+            logsFut.join()
+        );
+    }
+
+    private static <T> CompletableFuture<T> supplyParallelOrInline(Supplier<T> supplier) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            return CompletableFuture.completedFuture(supplier.get());
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            ADMIN_CONCURRENCY.acquireUninterruptibly();
+            try {
+                return supplier.get();
+            } finally {
+                ADMIN_CONCURRENCY.release();
+            }
+        }, ADMIN_EXECUTOR);
     }
 
     @PostMapping("/killswitch")
@@ -286,8 +366,8 @@ public class AdminController {
             "status", "success",
             "isBlocked", newState,
             "message", newState
-                ? "⛔️ Requisições à API de IA foram BLOQUEADAS com sucesso!"
-                : "🟢 Requisições à API de IA foram LIBERADAS!"
+                ? "Requisições à API de IA bloqueadas."
+                : "Requisições à API de IA liberadas."
         ));
     }
 
@@ -317,7 +397,7 @@ public class AdminController {
             "status", "updated",
             "maskedKey", appConfigService.getMaskedApiKey(),
             "model", appConfigService.getGeminiModel(),
-            "message", "Chave do Gemini e modelo atualizados com sucesso!"
+            "message", "Credencial e modelo Gemini atualizados."
         ));
     }
 
@@ -368,7 +448,7 @@ public class AdminController {
                 if (resp.statusCode() == 200) {
                     return ResponseEntity.ok(Map.of(
                         "status", "valid",
-                        "message", "✅ Chave Gemini válida e conectada com sucesso no modelo " + model + "!"
+                        "message", "Conexão validada com sucesso no modelo " + model + "."
                     ));
                 }
                 if (resp.statusCode() != 400 && resp.statusCode() != 401 && resp.statusCode() != 403 && resp.statusCode() != 404) {
@@ -584,7 +664,7 @@ public class AdminController {
         return ResponseEntity.ok(Map.of(
             "status", "reset_completed",
             "user", updated,
-            "message", "Conta zerada com sucesso e sinalizada para limpeza no aplicativo!"
+            "message", "Dados da conta reiniciados com sucesso."
         ));
     }
 

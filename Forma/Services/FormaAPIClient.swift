@@ -70,12 +70,20 @@ public final class FormaAPIClient {
 
             var request = URLRequest(url: url)
             request.httpMethod = method
+            if method.uppercased() == "GET" || normalizedPath.hasPrefix("/api/subscriptions") {
+                request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                request.setValue("no-cache, no-store, max-age=0", forHTTPHeaderField: "Cache-Control")
+                request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+            }
             let isLastCandidate = (index == candidates.count - 1)
+            let isPrimaryOrActiveHost = (index == 0)
+                || cleanBase == AuthManager.shared.serverBaseUrl
+                || cleanBase == AuthManager.configuredPlistUrl
             if cleanBase.lowercased().hasPrefix("https://") {
                 // Em servidores cloud (ex: Render Free Tier), aguarda eventual cold-start do container
                 request.timeoutInterval = max(timeout, 45.0)
             } else {
-                request.timeoutInterval = isLastCandidate ? timeout : min(timeout, 2.5)
+                request.timeoutInterval = (isLastCandidate || isPrimaryOrActiveHost) ? timeout : min(timeout, 2.5)
             }
             if serializedBody != nil {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")

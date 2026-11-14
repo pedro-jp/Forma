@@ -10,10 +10,12 @@ import com.forma.backend.entity.UserProfile;
 import com.forma.backend.repository.*;
 import com.forma.backend.security.FieldEncryptionService;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -21,6 +23,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 @Service
 public class PrivacyComplianceService {
@@ -41,6 +47,7 @@ public class PrivacyComplianceService {
     private final LegalConsentLedgerRepository legalConsentLedgerRepository;
     private final FieldEncryptionService fieldEncryptionService;
     private final MciAccessLogService mciAccessLogService;
+    private final ExecutorService exportExecutor = Executors.newFixedThreadPool(6);
 
     private volatile String currentDocumentsSha256 = "";
 
@@ -81,6 +88,11 @@ public class PrivacyComplianceService {
         String privacyText = readStaticResourceOrFallback("static/privacy.html", "privacy-v2026.11");
         String termsText = readStaticResourceOrFallback("static/terms.html", "terms-v2026.11");
         this.currentDocumentsSha256 = FieldEncryptionService.sha256Hex(privacyText + "\n---\n" + termsText);
+    }
+
+    @PreDestroy
+    void shutdownExportExecutor() {
+        exportExecutor.shutdownNow();
     }
 
     public String getCurrentPolicySha256() {
@@ -198,10 +210,64 @@ public class PrivacyComplianceService {
         );
     }
 
-    @Transactional(readOnly = true)
+    private <T> CompletableFuture<T> supplyParallelOrInline(Supplier<T> supplier) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            return CompletableFuture.completedFuture(supplier.get());
+        }
+        return CompletableFuture.supplyAsync(supplier, exportExecutor);
+    }
+
     public Map<String, Object> exportFullUserData(User user) {
         UUID userId = user.getId();
-        UserProfile profile = userProfileRepository.findById(userId).orElse(null);
+        String accountRefHash = fieldEncryptionService.hmacSha256Hex(userId.toString().toLowerCase());
+
+        CompletableFuture<UserProfile> profileFut = supplyParallelOrInline(
+            () -> userProfileRepository.findById(userId).orElse(null));
+        CompletableFuture<PrivacyDto.ConsentStatusResponse> consentsFut = supplyParallelOrInline(
+            () -> getConsentStatus(user));
+        CompletableFuture<List<Map<String, Object>>> aiUsageFut = supplyParallelOrInline(
+            () -> aiRequestLogRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(this::toExportAiLogMap).toList()
+        );
+        CompletableFuture<List<SyncDto.ActivityLogDto>> activityFut = supplyParallelOrInline(
+            () -> userActivityLogRepository.findByUserIdOrderByActivityTimestampDesc(userId).stream()
+                .map(SyncDto.ActivityLogDto::fromEntity).toList()
+        );
+        CompletableFuture<List<Map<String, Object>>> mciFut = supplyParallelOrInline(
+            () -> mciAccessLogRepository.findByAccountRefHashOrderByAccessedAtUtcDesc(accountRefHash).stream()
+                .map(this::toExportMciLogMap).toList()
+        );
+        CompletableFuture<List<SyncDto.FoodDto>> foodsFut = supplyParallelOrInline(
+            () -> foodEntryRepository.findByUserIdOrderByConsumedAtDesc(userId).stream()
+                .map(SyncDto.FoodDto::fromEntity).toList()
+        );
+        CompletableFuture<List<SyncDto.WorkoutDto>> workoutsFut = supplyParallelOrInline(
+            () -> workoutEntryRepository.findByUserIdOrderByWorkoutDateDesc(userId).stream()
+                .map(SyncDto.WorkoutDto::fromEntity).toList()
+        );
+        CompletableFuture<List<SyncDto.RoutineDto>> routinesFut = supplyParallelOrInline(
+            () -> workoutRoutineRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(SyncDto.RoutineDto::fromEntity).toList()
+        );
+        CompletableFuture<List<SyncDto.WaterDto>> watersFut = supplyParallelOrInline(
+            () -> waterEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream()
+                .map(SyncDto.WaterDto::fromEntity).toList()
+        );
+        CompletableFuture<List<SyncDto.WeightDto>> weightsFut = supplyParallelOrInline(
+            () -> weightEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream()
+                .map(SyncDto.WeightDto::fromEntity).toList()
+        );
+        CompletableFuture<List<SyncDto.AiAnalysisDto>> aiAnalysesFut = supplyParallelOrInline(
+            () -> aiAnalysisRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(SyncDto.AiAnalysisDto::fromEntity).toList()
+        );
+
+        CompletableFuture.allOf(
+            profileFut, consentsFut, aiUsageFut, activityFut, mciFut,
+            foodsFut, workoutsFut, routinesFut, watersFut, weightsFut, aiAnalysesFut
+        ).join();
+
+        UserProfile profile = profileFut.join();
 
         Map<String, Object> controllerMetadata = new LinkedHashMap<>();
         controllerMetadata.put("application", "Forma — Nutrição & Treinos Inteligentes");
@@ -228,38 +294,21 @@ public class PrivacyComplianceService {
         accountData.put("lastLoginAt", user.getLastLoginAt());
         accountData.put("lastSyncedAt", user.getLastSyncedAt());
 
-        List<Map<String, Object>> aiUsageLogs = aiRequestLogRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-            .map(this::toExportAiLogMap)
-            .toList();
-
-        List<SyncDto.ActivityLogDto> activityLogs = userActivityLogRepository
-            .findByUserIdOrderByActivityTimestampDesc(userId)
-            .stream()
-            .map(SyncDto.ActivityLogDto::fromEntity)
-            .toList();
-
-        String accountRefHash = fieldEncryptionService.hmacSha256Hex(userId.toString().toLowerCase());
-        List<Map<String, Object>> mciLogs = mciAccessLogRepository
-            .findByAccountRefHashOrderByAccessedAtUtcDesc(accountRefHash)
-            .stream()
-            .map(this::toExportMciLogMap)
-            .toList();
-
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("exportSchema", "forma-lgpd-art18-portability-v1");
         payload.put("metadata", controllerMetadata);
         payload.put("account", accountData);
-        payload.put("consents", getConsentStatus(user));
+        payload.put("consents", consentsFut.join());
         payload.put("profile", profile != null ? SyncDto.ProfileDto.fromEntity(profile) : null);
-        payload.put("foods", foodEntryRepository.findByUserIdOrderByConsumedAtDesc(userId).stream().map(SyncDto.FoodDto::fromEntity).toList());
-        payload.put("workouts", workoutEntryRepository.findByUserIdOrderByWorkoutDateDesc(userId).stream().map(SyncDto.WorkoutDto::fromEntity).toList());
-        payload.put("routines", workoutRoutineRepository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(SyncDto.RoutineDto::fromEntity).toList());
-        payload.put("waters", waterEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream().map(SyncDto.WaterDto::fromEntity).toList());
-        payload.put("weights", weightEntryRepository.findByUserIdOrderByEntryDateDesc(userId).stream().map(SyncDto.WeightDto::fromEntity).toList());
-        payload.put("aiAnalyses", aiAnalysisRepository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(SyncDto.AiAnalysisDto::fromEntity).toList());
-        payload.put("activityLogs", activityLogs);
-        payload.put("mciAccessLogs", mciLogs);
-        payload.put("recentAiRequestAudit", aiUsageLogs);
+        payload.put("foods", foodsFut.join());
+        payload.put("workouts", workoutsFut.join());
+        payload.put("routines", routinesFut.join());
+        payload.put("waters", watersFut.join());
+        payload.put("weights", weightsFut.join());
+        payload.put("aiAnalyses", aiAnalysesFut.join());
+        payload.put("activityLogs", activityFut.join());
+        payload.put("mciAccessLogs", mciFut.join());
+        payload.put("recentAiRequestAudit", aiUsageFut.join());
         return payload;
     }
 

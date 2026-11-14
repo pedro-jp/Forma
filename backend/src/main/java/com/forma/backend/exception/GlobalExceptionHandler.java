@@ -1,12 +1,14 @@
 package com.forma.backend.exception;
 
 import com.forma.backend.exception.DomainExceptions.*;
+import org.apache.catalina.connector.ClientAbortException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
@@ -98,6 +100,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, Object>> handleResourceNotFound(NoResourceFoundException ex) {
         return buildResponse(HttpStatus.NOT_FOUND, "Recurso ou endpoint não encontrado.", Map.of());
+    }
+
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public ResponseEntity<Void> handleClientAbort(Exception ex) {
+        log.debug("Cliente encerrou a conexão HTTP antes da resposta completa: {}", ex.getMessage());
+        return null;
     }
 
     @ExceptionHandler(Exception.class)

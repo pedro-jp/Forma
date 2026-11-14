@@ -89,6 +89,21 @@ public class UserSubscriptionEntity {
     @Column(name = "status_reason", length = 255)
     private String statusReason;
 
+    @Column(name = "next_billing_discount_percent")
+    private Integer nextBillingDiscountPercent;
+
+    @Column(name = "next_billing_discount_cents")
+    private Integer nextBillingDiscountCents;
+
+    @Column(name = "next_billing_coupon_code", length = 64)
+    private String nextBillingCouponCode;
+
+    @Column(name = "next_billing_price_cents")
+    private Integer nextBillingPriceCents;
+
+    @Column(name = "next_billing_discount_note", length = 180)
+    private String nextBillingDiscountNote;
+
     @Column(name = "created_at_utc")
     private Instant createdAtUtc = Instant.now();
 
@@ -168,6 +183,29 @@ public class UserSubscriptionEntity {
 
     public String getStatusReason() { return statusReason; }
     public void setStatusReason(String statusReason) { this.statusReason = statusReason; }
+
+    public Integer getNextBillingDiscountPercent() { return nextBillingDiscountPercent; }
+    public void setNextBillingDiscountPercent(Integer nextBillingDiscountPercent) { this.nextBillingDiscountPercent = nextBillingDiscountPercent; }
+
+    public Integer getNextBillingDiscountCents() { return nextBillingDiscountCents; }
+    public void setNextBillingDiscountCents(Integer nextBillingDiscountCents) { this.nextBillingDiscountCents = nextBillingDiscountCents; }
+
+    public String getNextBillingCouponCode() { return nextBillingCouponCode; }
+    public void setNextBillingCouponCode(String nextBillingCouponCode) { this.nextBillingCouponCode = nextBillingCouponCode; }
+
+    public Integer getNextBillingPriceCents() { return nextBillingPriceCents; }
+    public void setNextBillingPriceCents(Integer nextBillingPriceCents) { this.nextBillingPriceCents = nextBillingPriceCents; }
+
+    public String getNextBillingDiscountNote() { return nextBillingDiscountNote; }
+    public void setNextBillingDiscountNote(String nextBillingDiscountNote) { this.nextBillingDiscountNote = nextBillingDiscountNote; }
+
+    public void clearNextBillingDiscount() {
+        this.nextBillingDiscountPercent = null;
+        this.nextBillingDiscountCents = null;
+        this.nextBillingCouponCode = null;
+        this.nextBillingPriceCents = null;
+        this.nextBillingDiscountNote = null;
+    }
 
     public Instant getCreatedAtUtc() { return createdAtUtc; }
     public void setCreatedAtUtc(Instant createdAtUtc) { this.createdAtUtc = createdAtUtc; }

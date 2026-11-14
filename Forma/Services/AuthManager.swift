@@ -186,6 +186,7 @@ public final class AuthManager: ObservableObject {
         }
         if let saved = UserDefaults.standard.string(forKey: Self.lastWorkingServerUrlKey),
            !saved.isEmpty,
+           !saved.lowercased().hasPrefix("https://"),
            !Self.deprecatedSubnetHosts.contains(saved) {
             list.append(saved)
         }
@@ -223,6 +224,10 @@ public final class AuthManager: ObservableObject {
     @Published public var currentUserName: String? = nil
     @Published public var currentAuthProvider: String? = nil
     @Published public var accountTier: AccountTier = .free
+    @Published public var isAccountPaused: Bool = false
+    @Published public var accountPausedReason: String? = nil
+    @Published public var isAiAccessBlocked: Bool = false
+    @Published public var isGlobalAiBlocked: Bool = false
     @Published public var realtimeToastMessage: String? = nil
     @Published public var jwtToken: String? = nil
     @Published public var isAuthenticating: Bool = false
@@ -286,17 +291,18 @@ public final class AuthManager: ObservableObject {
         self.serverBaseUrl = resolvedUrl
 
         let previousOrigin = UserDefaults.standard.string(forKey: Self.boundServerOriginKey)
-        if Self.isConfiguredRemoteHttps {
-            UserDefaults.standard.set(resolvedUrl, forKey: Self.lastWorkingServerUrlKey)
-        }
-        if Self.isConfiguredRemoteHttps, previousOrigin != resolvedUrl {
-            // Trocou de servidor local para nuvem (Render): invalida apenas o JWT antigo sem apagar os dados locais do iPhone,
-            // permitindo que no novo login todos os registros locais sejam enviados ao Render / Supabase.
+        let previousWasHttps = previousOrigin?.lowercased().hasPrefix("https://") ?? false
+        let currentIsHttps = resolvedUrl.lowercased().hasPrefix("https://")
+
+        UserDefaults.standard.set(resolvedUrl, forKey: Self.lastWorkingServerUrlKey)
+
+        if let previousOrigin, previousOrigin != resolvedUrl, (Self.isConfiguredRemoteHttps || previousWasHttps != currentIsHttps) {
+            // Trocou entre ambiente remoto (Render HTTPS) e servidor local (HTTP), ou mudou de origem cloud:
+            // invalida apenas o JWT antigo para evitar erro de assinatura sem apagar os dados locais do iPhone.
             UserDefaults.standard.set(resolvedUrl, forKey: Self.boundServerOriginKey)
-            UserDefaults.standard.set(resolvedUrl, forKey: Self.lastWorkingServerUrlKey)
             KeychainHelper.shared.delete(key: tokenKey)
             UserDefaults.standard.removeObject(forKey: tokenKey)
-        } else if previousOrigin == nil {
+        } else {
             UserDefaults.standard.set(resolvedUrl, forKey: Self.boundServerOriginKey)
         }
 
@@ -364,8 +370,7 @@ public final class AuthManager: ObservableObject {
         AccountRealtimeSocketManager.shared.connectIfNeeded()
         Task { @MainActor in
             await AIDataConsentManager.shared.refreshFromBackendIfAuthenticated()
-            await SubscriptionManager.shared.loadStoreKitProducts()
-            await SubscriptionManager.shared.refreshMySubscription()
+            await SubscriptionManager.shared.refreshAllBeforeDisplay()
         }
     }
 
@@ -658,6 +663,10 @@ public final class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: BackendSyncManager.activeLocalUserIdKey)
         UserDefaults.standard.removeObject(forKey: "forma_last_sync_timestamp")
 
+        self.isAccountPaused = false
+        self.accountPausedReason = nil
+        self.isAiAccessBlocked = false
+        self.isGlobalAiBlocked = false
         BackendSyncManager.shared.cancelPendingSyncs()
         BackendSyncManager.shared.clearAllPendingDeletions()
         BackendSyncManager.shared.markRequiresInitialPull(false)
@@ -704,6 +713,10 @@ public final class AuthManager: ObservableObject {
 
         let result = try JSONDecoder().decode(AuthResponseModel.self, from: data)
 
+        self.isAccountPaused = false
+        self.accountPausedReason = nil
+        self.isAiAccessBlocked = false
+        self.isGlobalAiBlocked = false
         BackendSyncManager.shared.cancelPendingSyncs()
         BackendSyncManager.shared.clearAllPendingDeletions()
         BackendSyncManager.shared.hasCompletedInitialSessionPull = false
@@ -791,7 +804,7 @@ public final class AuthManager: ObservableObject {
         }
         AccountRealtimeSocketManager.shared.connectIfNeeded(forceReconnect: true)
         Task { @MainActor in
-            await SubscriptionManager.shared.refreshMySubscription()
+            await SubscriptionManager.shared.refreshAllBeforeDisplay()
         }
     }
 }
@@ -977,6 +990,27 @@ public final class AccountRealtimeSocketManager: ObservableObject {
             return
         }
 
+        if type == "BILLING_CATALOG_UPDATED" {
+            Task { @MainActor in
+                await SubscriptionManager.shared.refreshAllBeforeDisplay()
+            }
+            return
+        }
+
+        if type == "GLOBAL_AI_STATE" {
+            let blocked = (json["aiBlocked"] as? Bool) ?? false
+            let didChange = AuthManager.shared.isGlobalAiBlocked != blocked
+            AuthManager.shared.isGlobalAiBlocked = blocked
+            if didChange {
+                AuthManager.shared.showRealtimeToast(
+                    blocked
+                        ? "Serviço de IA temporariamente pausado pelo administrador."
+                        : "Serviço de IA reativado em tempo real."
+                )
+            }
+            return
+        }
+
         if type == "ACCOUNT_STATE" {
             if let msgUserId = json["userId"] as? String,
                let activeId = AuthManager.shared.currentUserId,
@@ -985,11 +1019,36 @@ public final class AccountRealtimeSocketManager: ObservableObject {
                 return
             }
 
-            if let rawTier = json["accountTier"] as? String {
+            let rawTier = json["accountTier"] as? String
+            if let rawTier {
                 AuthManager.shared.updateAccountTier(rawTier, notifyUser: true)
             }
 
             let eventName = json["event"] as? String
+            if let rawStatus = json["status"] as? String {
+                let pausedNow = rawStatus.uppercased() == "PAUSED"
+                let wasPaused = AuthManager.shared.isAccountPaused
+                AuthManager.shared.isAccountPaused = pausedNow
+                let rawReason = (json["pausedReason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                AuthManager.shared.accountPausedReason = pausedNow && rawReason?.isEmpty == false ? rawReason : nil
+
+                if eventName == "ADMIN_USER_PAUSED" || (!wasPaused && pausedNow) {
+                    AuthManager.shared.showRealtimeToast(
+                        rawReason?.isEmpty == false ? "Conta pausada: \(rawReason!)" : "Sua conta foi pausada pelo administrador."
+                    )
+                } else if eventName == "ADMIN_USER_RESUMED" || (wasPaused && !pausedNow) {
+                    AuthManager.shared.showRealtimeToast("Sua conta foi reativada pelo administrador.")
+                }
+            }
+
+            if let aiBlocked = json["aiBlocked"] as? Bool {
+                AuthManager.shared.isAiAccessBlocked = aiBlocked
+            }
+
+            if let rawName = json["name"] as? String, !rawName.isEmpty, !rawName.contains("*") {
+                AuthManager.shared.updateLocalUserName(rawName)
+            }
+
             let subStatus = json["subscriptionStatus"] as? String
             let overdueDay = json["overdueDay"] as? Int
             let graceEndsAtUtc = json["graceEndsAtUtc"] as? String
@@ -1003,6 +1062,10 @@ public final class AccountRealtimeSocketManager: ObservableObject {
                     graceEndsAtUtc: graceEndsAtUtc,
                     warningMessage: warningMessage
                 )
+            } else if rawTier != nil || (eventName?.hasPrefix("ADMIN_USER_TIER_") == true) {
+                Task { @MainActor in
+                    await SubscriptionManager.shared.refreshAllBeforeDisplay()
+                }
             }
 
             if let warningMessage, !warningMessage.isEmpty,
@@ -1012,7 +1075,7 @@ public final class AccountRealtimeSocketManager: ObservableObject {
                 AuthManager.shared.showRealtimeToast(warningMessage)
             }
 
-            if eventName == "ADMIN_USER_RESET" {
+            if eventName == "ADMIN_USER_RESET" || eventName == "ADMIN_USER_UPDATED" {
                 Task { @MainActor in
                     await BackendSyncManager.shared.sync(context: FormaDataStore.shared.mainContext, forcePull: true)
                 }
@@ -1024,7 +1087,7 @@ public final class AccountRealtimeSocketManager: ObservableObject {
         guard isAppInForeground, AuthManager.shared.isAuthenticated else { return }
         reconnectTask?.cancel()
         candidateIndex += 1
-        let delaySeconds = min(4.0, 0.8 + Double(reconnectAttempt) * 1.0)
+        let delaySeconds = min(2.0, 0.35 + Double(reconnectAttempt) * 0.45)
         reconnectAttempt += 1
 
         reconnectTask = Task { @MainActor [weak self] in

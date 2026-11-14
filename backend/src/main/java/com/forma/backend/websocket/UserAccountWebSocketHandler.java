@@ -186,6 +186,70 @@ public class UserAccountWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    public void broadcastGlobalAiState(boolean aiBlocked) {
+        if (sessionsByUserId.isEmpty()) return;
+
+        String json;
+        try {
+            Map<String, Object> payload = Map.of(
+                "type", "GLOBAL_AI_STATE",
+                "aiBlocked", aiBlocked,
+                "timestamp", Instant.now().toString()
+            );
+            json = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.warn("[WebSocket Account] Erro ao serializar GLOBAL_AI_STATE: {}", e.getMessage());
+            return;
+        }
+
+        TextMessage textMessage = new TextMessage(json);
+        for (Set<WebSocketSession> userSessions : sessionsByUserId.values()) {
+            for (WebSocketSession session : userSessions) {
+                if (session.isOpen()) {
+                    synchronized (session) {
+                        try {
+                            session.sendMessage(textMessage);
+                        } catch (IOException e) {
+                            log.warn("[WebSocket Account] Falha ao enviar GLOBAL_AI_STATE para session={}: {}", session.getId(), e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void broadcastCatalogUpdated(String reason) {
+        if (sessionsByUserId.isEmpty()) return;
+
+        String json;
+        try {
+            Map<String, Object> payload = Map.of(
+                "type", "BILLING_CATALOG_UPDATED",
+                "reason", reason != null ? reason : "UPDATED",
+                "timestamp", Instant.now().toString()
+            );
+            json = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.warn("[WebSocket Account] Erro ao serializar BILLING_CATALOG_UPDATED: {}", e.getMessage());
+            return;
+        }
+
+        TextMessage textMessage = new TextMessage(json);
+        for (Set<WebSocketSession> userSessions : sessionsByUserId.values()) {
+            for (WebSocketSession session : userSessions) {
+                if (session.isOpen()) {
+                    synchronized (session) {
+                        try {
+                            session.sendMessage(textMessage);
+                        } catch (IOException e) {
+                            log.warn("[WebSocket Account] Falha ao enviar catálogo atualizado para session={}: {}", session.getId(), e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public void sendAccountDeletedToUser(UUID userId) {
         if (userId == null) return;
         Set<WebSocketSession> sessions = sessionsByUserId.remove(userId);

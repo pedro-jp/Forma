@@ -5,6 +5,7 @@ import com.forma.backend.dto.SyncDto;
 import com.forma.backend.entity.DeletedAccountTombstoneEntity;
 import com.forma.backend.entity.User;
 import com.forma.backend.entity.UserProfile;
+import com.forma.backend.entity.UserSubscriptionEntity;
 import com.forma.backend.exception.DomainExceptions.ResourceNotFoundException;
 import com.forma.backend.repository.*;
 import com.forma.backend.security.FieldEncryptionService;
@@ -12,16 +13,30 @@ import com.forma.backend.websocket.AdminEventPublisherService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 @Service
 public class AdminUserService {
+
+    private static final ExecutorService QUERY_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Semaphore QUERY_CONCURRENCY = new Semaphore(10);
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
@@ -86,14 +101,90 @@ public class AdminUserService {
         this.fieldEncryptionService = fieldEncryptionService;
     }
 
-    @Transactional(readOnly = true)
     public List<AdminDto.UserSummaryDto> listAllUsers() {
         Instant startOfDay = currentStartOfDay();
-        return userRepository.findAll().stream()
+
+        CompletableFuture<List<User>> usersFut = supplyParallelOrInline(userRepository::findAll);
+        CompletableFuture<Map<UUID, UserProfile>> profilesFut = supplyParallelOrInline(() ->
+            userProfileRepository.findAll().stream()
+                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity(), (a, b) -> a))
+        );
+        CompletableFuture<Map<UUID, Long>> todayAiFut = supplyParallelOrInline(
+            () -> toCountMap(aiRequestLogRepository.countSinceGroupedByUserId(startOfDay))
+        );
+        CompletableFuture<Map<UUID, Long>> totalAiFut = supplyParallelOrInline(
+            () -> toCountMap(aiRequestLogRepository.countTotalGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> foodsFut = supplyParallelOrInline(
+            () -> toCountMap(foodEntryRepository.countGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> workoutsFut = supplyParallelOrInline(
+            () -> toCountMap(workoutEntryRepository.countGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> routinesFut = supplyParallelOrInline(
+            () -> toCountMap(workoutRoutineRepository.countGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> watersFut = supplyParallelOrInline(
+            () -> toCountMap(waterEntryRepository.countGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> weightsFut = supplyParallelOrInline(
+            () -> toCountMap(weightEntryRepository.countGroupedByUserId())
+        );
+        CompletableFuture<Map<UUID, Long>> analysesFut = supplyParallelOrInline(
+            () -> toCountMap(aiAnalysisRepository.countGroupedByUserId())
+        );
+
+        CompletableFuture.allOf(
+            usersFut, profilesFut, todayAiFut, totalAiFut, foodsFut,
+            workoutsFut, routinesFut, watersFut, weightsFut, analysesFut
+        ).join();
+
+        List<User> users = usersFut.join();
+        Map<UUID, UserProfile> profiles = profilesFut.join();
+        Map<UUID, Long> todayAi = todayAiFut.join();
+        Map<UUID, Long> totalAi = totalAiFut.join();
+        Map<UUID, Long> foods = foodsFut.join();
+        Map<UUID, Long> workouts = workoutsFut.join();
+        Map<UUID, Long> routines = routinesFut.join();
+        Map<UUID, Long> waters = watersFut.join();
+        Map<UUID, Long> weights = weightsFut.join();
+        Map<UUID, Long> analyses = analysesFut.join();
+
+        return users.stream()
             .sorted(Comparator.comparing(
                 (User u) -> u.getCreatedAt() != null ? u.getCreatedAt() : Instant.EPOCH
             ).reversed())
-            .map(u -> toSummary(u, startOfDay))
+            .map(u -> {
+                UUID id = u.getId();
+                UserProfile profile = profiles.get(id);
+                return new AdminDto.UserSummaryDto(
+                    id,
+                    u.getEmail(),
+                    u.getName(),
+                    u.getAuthProvider(),
+                    u.getStatus(),
+                    u.getPausedReason(),
+                    u.isAiBlocked(),
+                    u.getDailyAiLimit(),
+                    todayAi.getOrDefault(id, 0L),
+                    totalAi.getOrDefault(id, 0L),
+                    foods.getOrDefault(id, 0L),
+                    workouts.getOrDefault(id, 0L),
+                    routines.getOrDefault(id, 0L),
+                    waters.getOrDefault(id, 0L),
+                    weights.getOrDefault(id, 0L),
+                    analyses.getOrDefault(id, 0L),
+                    profile != null ? profile.getGoal() : "Ganhar peso",
+                    profile != null ? profile.getCurrentWeight() : 72.0,
+                    profile != null ? profile.getTargetWeight() : 80.0,
+                    profile != null ? profile.getTargetCalorieIntake() : 2800.0,
+                    u.getCreatedAt(),
+                    u.getLastLoginAt(),
+                    u.getLastSyncedAt(),
+                    u.getForceResetAt(),
+                    u.getAccountTier()
+                );
+            })
             .toList();
     }
 
@@ -156,6 +247,7 @@ public class AdminUserService {
 
         User saved = userRepository.save(user);
         userProfileRepository.save(new UserProfile(saved.getId()));
+        syncSubscriptionForAdminTier(saved, saved.isPro());
 
         broadcastState("ADMIN_USER_CREATED", saved);
         return toSummary(saved, currentStartOfDay());
@@ -164,6 +256,7 @@ public class AdminUserService {
     @Transactional
     public AdminDto.UserSummaryDto updateUser(UUID userId, AdminDto.UpdateUserRequest req) {
         User user = findUserOrThrow(userId);
+        String previousTier = user.getAccountTier();
 
         if (req != null) {
             if (req.name() != null && !req.name().isBlank()) {
@@ -184,6 +277,11 @@ public class AdminUserService {
             }
         }
         User saved = userRepository.save(user);
+        boolean tierChanged = req != null
+            && req.accountTier() != null
+            && !req.accountTier().isBlank()
+            && !User.normalizeTier(previousTier).equalsIgnoreCase(saved.getAccountTier());
+        syncSubscriptionForAdminTier(saved, tierChanged);
 
         if (req != null) {
             UserProfile profile = userProfileRepository.findById(userId)
@@ -249,6 +347,7 @@ public class AdminUserService {
         user.setAccountTier(nextTier);
 
         User saved = userRepository.save(user);
+        syncSubscriptionForAdminTier(saved, true);
         broadcastState("PRO".equals(nextTier) ? "ADMIN_USER_TIER_PRO" : "ADMIN_USER_TIER_FREE", saved);
         return toSummary(saved, currentStartOfDay());
     }
@@ -257,11 +356,43 @@ public class AdminUserService {
     public AdminDto.UserSummaryDto resetUserAccount(UUID userId, AdminDto.ResetUserRequest req) {
         User user = findUserOrThrow(userId);
 
-        boolean clearMealsWorkouts = req == null || req.clearMealsAndWorkouts() == null || req.clearMealsAndWorkouts();
-        boolean clearHydrationWeights = req == null || req.clearHydrationAndWeights() == null || req.clearHydrationAndWeights();
-        boolean clearRoutines = req == null || req.clearRoutines() == null || req.clearRoutines();
-        boolean clearAnalysesLogs = req == null || req.clearAnalysesAndLogs() == null || req.clearAnalysesAndLogs();
-        boolean resetProfile = req == null || req.resetProfileGoals() == null || req.resetProfileGoals();
+        String scope = (req != null && req.scope() != null && !req.scope().isBlank())
+            ? req.scope().trim().toUpperCase()
+            : null;
+        boolean clearMealsWorkouts;
+        boolean clearHydrationWeights;
+        boolean clearRoutines;
+        boolean clearAnalysesLogs;
+        boolean resetProfile;
+        boolean clearAiLogsFlag;
+
+        if (scope != null) {
+            clearMealsWorkouts = "MEALS_AND_WORKOUTS".equals(scope)
+                || "ALL_HEALTH_DATA".equals(scope)
+                || Boolean.TRUE.equals(req.clearMealsAndWorkouts());
+            clearHydrationWeights = "ALL_HEALTH_DATA".equals(scope)
+                || Boolean.TRUE.equals(req.clearHydrationAndWeights());
+            clearRoutines = "MEALS_AND_WORKOUTS".equals(scope)
+                || "ALL_HEALTH_DATA".equals(scope)
+                || Boolean.TRUE.equals(req.clearRoutines());
+            clearAnalysesLogs = "AI_HISTORY".equals(scope)
+                || "ALL_HEALTH_DATA".equals(scope)
+                || Boolean.TRUE.equals(req.clearAnalysesAndLogs());
+            resetProfile = "PROFILE_GOALS".equals(scope)
+                || "ALL_HEALTH_DATA".equals(scope)
+                || Boolean.TRUE.equals(req.resetProfileGoals());
+            clearAiLogsFlag = !Boolean.FALSE.equals(req.clearAiLogs())
+                && (Boolean.TRUE.equals(req.clearAiLogs())
+                    || "AI_HISTORY".equals(scope)
+                    || "ALL_HEALTH_DATA".equals(scope));
+        } else {
+            clearMealsWorkouts = req == null || req.clearMealsAndWorkouts() == null || req.clearMealsAndWorkouts();
+            clearHydrationWeights = req == null || req.clearHydrationAndWeights() == null || req.clearHydrationAndWeights();
+            clearRoutines = req == null || req.clearRoutines() == null || req.clearRoutines();
+            clearAnalysesLogs = req == null || req.clearAnalysesAndLogs() == null || req.clearAnalysesAndLogs();
+            resetProfile = req == null || req.resetProfileGoals() == null || req.resetProfileGoals();
+            clearAiLogsFlag = req != null && Boolean.TRUE.equals(req.clearAiLogs());
+        }
 
         if (clearMealsWorkouts) {
             foodEntryRepository.deleteByUserId(userId);
@@ -277,6 +408,9 @@ public class AdminUserService {
         if (clearAnalysesLogs) {
             aiAnalysisRepository.deleteByUserId(userId);
             userActivityLogRepository.deleteByUserId(userId);
+        }
+        if (clearAiLogsFlag) {
+            aiRequestLogRepository.deleteByUserId(userId);
         }
         if (resetProfile) {
             UserProfile cleanProfile = new UserProfile(userId);
@@ -386,6 +520,101 @@ public class AdminUserService {
 
     private static Instant currentStartOfDay() {
         return LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
+    }
+
+    private void syncSubscriptionForAdminTier(User saved, boolean tierChanged) {
+        if (!tierChanged || userSubscriptionRepository == null || saved == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        if (saved.isPro()) {
+            UserSubscriptionEntity sub = userSubscriptionRepository.findByUserId(saved.getId())
+                .orElseGet(UserSubscriptionEntity::new);
+            String existingStatus = sub.getStatus();
+            if (!"ACTIVE".equalsIgnoreCase(existingStatus) && !"TRIALING".equalsIgnoreCase(existingStatus)) {
+                Instant end = now.plus(Duration.ofDays(30));
+                sub.setUserId(saved.getId());
+                sub.setUserEmail(saved.getEmail());
+                sub.setPlanId("PRO_MONTHLY");
+                sub.setPlanName("Forma Pro Mensal");
+                sub.setSource("ADMIN_MANUAL");
+                sub.setStatus("TRIALING");
+                sub.setPriceCents(0);
+                sub.setCurrency("BRL");
+                sub.setAutoRenew(false);
+                sub.setCurrentPeriodStartUtc(now);
+                sub.setCurrentPeriodEndUtc(end);
+                sub.setTrialEndsAtUtc(end);
+                sub.setOverdueSinceUtc(null);
+                sub.setGraceEndsAtUtc(null);
+                sub.setLastWarningDaySent(0);
+                sub.setDunningWarningsSent(0);
+                sub.setPausedAtUtc(null);
+                sub.setCanceledAtUtc(null);
+                sub.setStatusReason("Cortesia liberada (30 dias grátis)");
+                sub.setUpdatedAtUtc(now);
+                userSubscriptionRepository.save(sub);
+            }
+            adminEventPublisherService.publishUserSubscriptionState(
+                saved,
+                "SUBSCRIPTION_ACTIVATED",
+                "TRIALING",
+                null,
+                null,
+                "Forma Pro liberado!"
+            );
+            adminEventPublisherService.publishBillingUpdated("ADMIN_USER_TIER_PRO");
+        } else {
+            userSubscriptionRepository.findByUserId(saved.getId()).ifPresent(sub -> {
+                String status = sub.getStatus();
+                if ("ACTIVE".equalsIgnoreCase(status)
+                    || "TRIALING".equalsIgnoreCase(status)
+                    || "PAST_DUE".equalsIgnoreCase(status)) {
+                    sub.setStatus("CANCELED");
+                    sub.setCanceledAtUtc(now);
+                    sub.setAutoRenew(false);
+                    sub.setOverdueSinceUtc(null);
+                    sub.setGraceEndsAtUtc(null);
+                    sub.setStatusReason("Alterado para Camada Essencial pelo administrador");
+                    sub.setUpdatedAtUtc(now);
+                    userSubscriptionRepository.save(sub);
+                }
+            });
+            adminEventPublisherService.publishUserSubscriptionState(
+                saved,
+                "SUBSCRIPTION_ENFORCED",
+                "CANCELED",
+                null,
+                null,
+                "Conta alterada para a Camada Essencial."
+            );
+            adminEventPublisherService.publishBillingUpdated("ADMIN_USER_TIER_FREE");
+        }
+    }
+
+    private static <T> CompletableFuture<T> supplyParallelOrInline(Supplier<T> supplier) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            return CompletableFuture.completedFuture(supplier.get());
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            QUERY_CONCURRENCY.acquireUninterruptibly();
+            try {
+                return supplier.get();
+            } finally {
+                QUERY_CONCURRENCY.release();
+            }
+        }, QUERY_EXECUTOR);
+    }
+
+    private static Map<UUID, Long> toCountMap(List<Object[]> rows) {
+        Map<UUID, Long> result = new HashMap<>();
+        if (rows == null) return result;
+        for (Object[] row : rows) {
+            if (row != null && row.length >= 2 && row[0] instanceof UUID id && row[1] instanceof Number num) {
+                result.put(id, num.longValue());
+            }
+        }
+        return result;
     }
 
     private void broadcastState(String eventName, User user) {

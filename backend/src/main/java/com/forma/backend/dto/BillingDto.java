@@ -3,11 +3,12 @@ package com.forma.backend.dto;
 import com.forma.backend.entity.*;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 public class BillingDto {
 
-    // MARK: - Plans
+    // MARK: - Plans & Live Catalog
     public record PlanSummaryDto(
         String id,
         String name,
@@ -17,7 +18,8 @@ public class BillingDto {
         int priceCents,
         String currency,
         int defaultTrialDays,
-        boolean active
+        boolean active,
+        String updatedAtUtc
     ) {
         public static PlanSummaryDto fromEntity(SubscriptionPlanEntity e) {
             return new PlanSummaryDto(
@@ -29,10 +31,18 @@ public class BillingDto {
                 e.getPriceCents(),
                 e.getCurrency(),
                 e.getDefaultTrialDays(),
-                e.isActive()
+                e.isActive(),
+                e.getUpdatedAtUtc() != null ? e.getUpdatedAtUtc().toString() : null
             );
         }
     }
+
+    public record LiveBillingCatalogDto(
+        List<PlanSummaryDto> plans,
+        int graceDays,
+        String overdueActionPolicy,
+        String serverTimestampUtc
+    ) {}
 
     public record UpdatePlanRequest(
         String name,
@@ -54,7 +64,9 @@ public class BillingDto {
         Integer maxRedemptions,
         Integer perUserLimit,
         String expiresAtUtc,
-        Boolean active
+        Boolean active,
+        String restrictedToEmail,
+        Boolean firstTimeOnly
     ) {}
 
     public record CouponSummaryDto(
@@ -66,15 +78,22 @@ public class BillingDto {
         Integer discountCents,
         Integer freePeriodDays,
         String applicablePlanId,
-        Integer maxRedemptions,
+        int maxRedemptions,
         int currentRedemptions,
+        int remainingRedemptions,
         int perUserLimit,
+        String restrictedToEmail,
+        boolean firstTimeOnly,
         String expiresAtUtc,
+        boolean expired,
+        boolean exhausted,
+        String exhaustedAtUtc,
         boolean active,
         String createdByAdmin,
         String createdAtUtc
     ) {
         public static CouponSummaryDto fromEntity(CouponEntity c) {
+            Instant now = Instant.now();
             return new CouponSummaryDto(
                 c.getId().toString(),
                 c.getCode(),
@@ -86,8 +105,14 @@ public class BillingDto {
                 c.getApplicablePlanId(),
                 c.getMaxRedemptions(),
                 c.getCurrentRedemptions(),
+                c.getRemainingRedemptions(),
                 c.getPerUserLimit(),
+                c.getRestrictedToEmail(),
+                c.isFirstTimeOnly(),
                 c.getExpiresAtUtc() != null ? c.getExpiresAtUtc().toString() : null,
+                c.isExpired(now),
+                c.isExhausted(),
+                c.getExhaustedAtUtc() != null ? c.getExhaustedAtUtc().toString() : null,
                 c.isActive(),
                 c.getCreatedByAdmin(),
                 c.getCreatedAtUtc() != null ? c.getCreatedAtUtc().toString() : null
@@ -197,6 +222,11 @@ public class BillingDto {
         int priceCents,
         String currency,
         String appliedCouponCode,
+        Integer nextBillingDiscountPercent,
+        Integer nextBillingDiscountCents,
+        String nextBillingCouponCode,
+        Integer nextBillingPriceCents,
+        String nextBillingDiscountLabel,
         boolean autoRenew,
         String externalTransactionId,
         String currentPeriodStartUtc,
@@ -222,6 +252,11 @@ public class BillingDto {
             String activeWarningMessage,
             List<DunningNoticeDto> notices
         ) {
+            String nextLabel = formatNextBillingDiscountLabel(
+                s.getNextBillingPriceCents(),
+                s.getNextBillingDiscountPercent(),
+                s.getNextBillingDiscountCents()
+            );
             return new UserSubscriptionStatusDto(
                 s.getId().toString(),
                 s.getUserId().toString(),
@@ -234,6 +269,11 @@ public class BillingDto {
                 s.getPriceCents(),
                 s.getCurrency(),
                 s.getAppliedCouponCode(),
+                s.getNextBillingDiscountPercent(),
+                s.getNextBillingDiscountCents(),
+                s.getNextBillingCouponCode(),
+                s.getNextBillingPriceCents(),
+                nextLabel,
                 s.isAutoRenew(),
                 s.getExternalTransactionId(),
                 s.getCurrentPeriodStartUtc() != null ? s.getCurrentPeriodStartUtc().toString() : null,
@@ -252,9 +292,83 @@ public class BillingDto {
                 notices
             );
         }
+
+        public static UserSubscriptionStatusDto freeDefault(
+            UUID userId,
+            String userEmail,
+            String accountTier,
+            boolean isPro,
+            String overdueActionPolicy,
+            List<DunningNoticeDto> notices
+        ) {
+            return new UserSubscriptionStatusDto(
+                null,
+                userId != null ? userId.toString() : null,
+                userEmail,
+                accountTier,
+                "FREE",
+                isPro ? "Forma Pro" : "Plano Gratuito",
+                "NONE",
+                isPro ? "ACTIVE" : "FREE",
+                0,
+                "BRL",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                0,
+                overdueActionPolicy,
+                isPro ? "Acesso Pro ativo." : "Sem assinatura paga vinculada.",
+                false,
+                null,
+                null,
+                null,
+                notices
+            );
+        }
+
+        private static String formatNextBillingDiscountLabel(
+            Integer nextPriceCents,
+            Integer pct,
+            Integer discCents
+        ) {
+            if (nextPriceCents == null) {
+                return null;
+            }
+            Locale ptBr = Locale.forLanguageTag("pt-BR");
+            String formattedNext = String.format(ptBr, "R$ %.2f", nextPriceCents / 100.0);
+            if (pct != null && pct > 0) {
+                return "-" + pct + "% na próxima cobrança (" + formattedNext + ")";
+            }
+            if (discCents != null && discCents > 0) {
+                return String.format(ptBr, "-R$ %.2f na próxima cobrança (%s)", discCents / 100.0, formattedNext);
+            }
+            return "Próxima cobrança ajustada para " + formattedNext;
+        }
     }
 
     // MARK: - Admin Subscription Actions
+    public record ApplyNextBillingDiscountRequest(
+        UUID userId,
+        String userEmail,
+        UUID subscriptionId,
+        String couponCode,
+        String discountType,
+        Integer discountPercent,
+        Integer discountCents,
+        String planId,
+        String note
+    ) {}
     public record AdminGrantSubscriptionRequest(
         UUID userId,
         String userEmail,

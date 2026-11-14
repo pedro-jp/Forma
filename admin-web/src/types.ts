@@ -101,6 +101,15 @@ export interface AdminOverview {
   recentLogs: AiLogSummary[];
 }
 
+export interface AdminBootstrapResponse {
+  username: string;
+  overview: AdminOverview;
+  billing: BillingDashboardData | null;
+  auditLogs: AdminAuditItem[];
+  incidents: SecurityIncidentItem[];
+  serverTimestampUtc: string;
+}
+
 export interface WebSocketEvent<T = any> {
   type:
     | 'CONNECTED'
@@ -109,7 +118,9 @@ export interface WebSocketEvent<T = any> {
     | 'SYNC_ACTIVITY'
     | 'KILL_SWITCH_CHANGED'
     | 'CONFIG_UPDATED'
-    | 'BILLING_UPDATED';
+    | 'BILLING_UPDATED'
+    | 'AUDIT_LOG_CREATED'
+    | 'SECURITY_INCIDENT_CREATED';
   timestamp: string;
   data?: T;
   message?: string;
@@ -136,10 +147,16 @@ export interface CouponItem {
   discountCents?: number | null;
   freePeriodDays?: number | null;
   applicablePlanId?: string | null;
-  maxRedemptions?: number | null;
+  maxRedemptions: number;
   currentRedemptions: number;
+  remainingRedemptions?: number;
   perUserLimit: number;
+  restrictedToEmail?: string | null;
+  firstTimeOnly?: boolean;
   expiresAtUtc?: string | null;
+  expired?: boolean;
+  exhausted?: boolean;
+  exhaustedAtUtc?: string | null;
   active: boolean;
   createdByAdmin?: string | null;
   createdAtUtc?: string | null;
@@ -181,6 +198,11 @@ export interface UserSubscriptionItem {
   priceCents: number;
   currency: string;
   appliedCouponCode?: string | null;
+  nextBillingDiscountPercent?: number | null;
+  nextBillingDiscountCents?: number | null;
+  nextBillingCouponCode?: string | null;
+  nextBillingPriceCents?: number | null;
+  nextBillingDiscountLabel?: string | null;
   autoRenew: boolean;
   externalTransactionId?: string | null;
   currentPeriodStartUtc?: string | null;

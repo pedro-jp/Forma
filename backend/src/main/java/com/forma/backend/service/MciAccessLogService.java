@@ -5,9 +5,11 @@ import com.forma.backend.entity.MciAccessLogEntity;
 import com.forma.backend.repository.AdminAuditLogRepository;
 import com.forma.backend.repository.MciAccessLogRepository;
 import com.forma.backend.security.FieldEncryptionService;
+import com.forma.backend.websocket.AdminEventPublisherService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +32,9 @@ public class MciAccessLogService {
     private final MciAccessLogRepository mciAccessLogRepository;
     private final AdminAuditLogRepository adminAuditLogRepository;
     private final FieldEncryptionService fieldEncryptionService;
+
+    @Autowired(required = false)
+    private AdminEventPublisherService adminEventPublisherService;
 
     public MciAccessLogService(
         MciAccessLogRepository mciAccessLogRepository,
@@ -79,7 +84,10 @@ public class MciAccessLogService {
                 safeSummary,
                 extractClientIp(request)
             );
-            adminAuditLogRepository.saveAndFlush(audit);
+            AdminAuditLogEntity savedAudit = adminAuditLogRepository.saveAndFlush(audit);
+            if (adminEventPublisherService != null) {
+                adminEventPublisherService.publishAdminAuditLog(savedAudit);
+            }
         } catch (Exception e) {
             log.warn("[AdminAudit] Falha ao gravar auditoria administrativa: {}", e.getMessage());
         }

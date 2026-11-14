@@ -1,6 +1,8 @@
 package com.forma.backend.dto;
 
+import com.forma.backend.entity.AdminAuditLogEntity;
 import com.forma.backend.entity.AiRequestLogEntity;
+import com.forma.backend.entity.SecurityIncidentLogEntity;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +21,15 @@ public class AdminDto {
         boolean aiBlocked,
         List<UserSummaryDto> recentUsers,
         List<AiLogSummaryDto> recentLogs
+    ) {}
+
+    public record AdminBootstrapResponse(
+        String username,
+        AdminOverviewResponse overview,
+        BillingDto.BillingDashboardResponse billing,
+        List<AdminAuditLogEntity> auditLogs,
+        List<SecurityIncidentLogEntity> incidents,
+        Instant serverTimestampUtc
     ) {}
 
     public record UpdateKeyRequest(
@@ -195,8 +206,30 @@ public class AdminDto {
         Boolean clearHydrationAndWeights,
         Boolean clearRoutines,
         Boolean clearAnalysesAndLogs,
-        Boolean resetProfileGoals
-    ) {}
+        Boolean resetProfileGoals,
+        String scope,
+        Boolean keepAuthAccount,
+        Boolean clearAiLogs
+    ) {
+        public ResetUserRequest(
+            Boolean clearMealsAndWorkouts,
+            Boolean clearHydrationAndWeights,
+            Boolean clearRoutines,
+            Boolean clearAnalysesAndLogs,
+            Boolean resetProfileGoals
+        ) {
+            this(
+                clearMealsAndWorkouts,
+                clearHydrationAndWeights,
+                clearRoutines,
+                clearAnalysesAndLogs,
+                resetProfileGoals,
+                null,
+                true,
+                false
+            );
+        }
+    }
 
     public record AiLogSummaryDto(
         UUID id,

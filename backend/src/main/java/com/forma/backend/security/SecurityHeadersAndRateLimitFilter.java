@@ -78,10 +78,26 @@ public class SecurityHeadersAndRateLimitFilter extends OncePerRequestFilter {
         response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
 
         String path = request.getRequestURI();
-        if (path != null && path.startsWith("/api/")) {
+        boolean isApi = path != null && path.startsWith("/api/");
+        boolean isHtmlEntry = path != null && (
+            path.equals("/")
+            || path.equals("/index.html")
+            || path.equals("/admin")
+            || path.equals("/admin/")
+            || path.equals("/admin/index.html")
+            || path.equals("/docs")
+            || path.equals("/docs.html")
+            || path.equals("/privacy")
+            || path.equals("/privacy.html")
+            || path.equals("/terms")
+            || path.equals("/terms.html")
+        );
+
+        if (isApi || isHtmlEntry) {
             response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
             response.setHeader("Pragma", "no-cache");
-        } else {
+        }
+        if (!isApi) {
             response.setHeader(
                 "Content-Security-Policy",
                 "default-src 'self'; "

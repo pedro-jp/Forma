@@ -3,276 +3,609 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Forma — Ecossistema Seguro de Nutrição, Hidratação e Treinos</title>
+  <title>Forma — Nutrição, Treino e Evolução</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #080c12;
-      --surface: #111824;
-      --surface-alt: #161f2f;
-      --border: rgba(255, 255, 255, 0.1);
-      --text: #f3f6fa;
-      --muted: #a6b4c8;
-      --accent: #32d79b;
-      --accent-dark: #06281c;
-      --info: #60a5fa;
-      --violet: #a78bfa;
+      --bg: #f4f6f5;
+      --surface: #ffffff;
+      --surface-subtle: #f8faf9;
+      --border: #d9dfd9;
+      --border-soft: #e6ebe7;
+      --ink: #10201a;
+      --ink-muted: #4b5d56;
+      --ink-subtle: #708079;
+      --accent: #17694f;
+      --accent-hover: #11523d;
+      --accent-soft: #ebf5f0;
+      --danger: #9f2d2d;
+      --danger-soft: #fdf2f2;
     }
-    * { box-sizing: border-box; }
-    body {
+
+    * {
+      box-sizing: border-box;
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-      background:
-        radial-gradient(ellipse at 80% 0%, rgba(50, 215, 155, 0.14), transparent 50%),
-        radial-gradient(ellipse at 10% 25%, rgba(96, 165, 250, 0.1), transparent 45%),
-        var(--bg);
-      color: var(--text);
-      line-height: 1.62;
+      padding: 0;
     }
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-      background: rgba(8, 12, 18, 0.88);
-      backdrop-filter: blur(14px);
-      border-bottom: 1px solid var(--border);
+
+    body {
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      padding: 32px 20px 56px;
     }
-    .topbar-inner {
-      max-width: 1120px;
+
+    .sheet {
+      max-width: 1040px;
       margin: 0 auto;
-      padding: 14px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border-soft);
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid var(--border-soft);
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+
+    .brand-sub {
+      display: block;
+      font-size: 12px;
+      color: var(--ink-subtle);
+      font-weight: 400;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .nav a {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .nav a:hover {
+      color: var(--ink);
+    }
+
+    .nav a.nav-primary {
+      background: var(--accent);
+      color: #ffffff;
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .nav a.nav-primary:hover {
+      background: var(--accent-hover);
+      color: #ffffff;
+    }
+
+    .hero {
+      padding: 44px 32px 36px;
+      border-bottom: 1px solid var(--border-soft);
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.8fr);
+      gap: 32px;
+      align-items: start;
+    }
+
+    .eyebrow {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: 30px;
+      line-height: 1.2;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 14px;
+    }
+
+    .lead {
+      font-size: 15.5px;
+      color: var(--ink-muted);
+      max-width: 58ch;
+      margin-bottom: 24px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent);
+      color: #ffffff;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 18px;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--border);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 9px 16px;
+      border-radius: 4px;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface-subtle);
+      border-color: #bcc6bd;
+    }
+
+    .status-box {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-soft);
+      border-radius: 5px;
+      padding: 18px 20px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .status-label {
+      font-size: 12.5px;
+      color: var(--ink-subtle);
+      font-weight: 500;
+    }
+
+    .status-value {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ink-subtle);
+      flex-shrink: 0;
+    }
+
+    .dot.is-ok {
+      background: var(--accent);
+    }
+
+    .dot.is-down {
+      background: var(--danger);
+    }
+
+    .meta-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .meta-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .meta-item span:first-child {
+      color: var(--ink-subtle);
+    }
+
+    .meta-item span:last-child {
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--ink);
+      font-size: 12.5px;
+    }
+
+    .section {
+      padding: 32px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .section:last-of-type {
+      border-bottom: none;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    h2 {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      color: var(--ink);
+    }
+
+    .section-note {
+      font-size: 13px;
+      color: var(--ink-subtle);
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .panel {
+      border: 1px solid var(--border-soft);
+      border-radius: 5px;
+      padding: 18px 20px;
+      background: var(--surface);
+    }
+
+    .panel h3 {
+      font-size: 14.5px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--ink);
+    }
+
+    .panel p {
+      font-size: 13.5px;
+      color: var(--ink-muted);
+    }
+
+    .plan-price {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--ink);
+      margin: 10px 0 6px;
+    }
+
+    .plan-period {
+      font-size: 12.5px;
+      color: var(--ink-subtle);
+      font-family: 'IBM Plex Sans', sans-serif;
+    }
+
+    .plan-trial {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 3px;
+    }
+
+    .doc-links {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .doc-link {
+      display: block;
+      text-decoration: none;
+      border: 1px solid var(--border-soft);
+      border-radius: 5px;
+      padding: 16px 18px;
+      background: var(--surface-subtle);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .doc-link:hover {
+      border-color: var(--border);
+      background: #f1f5f2;
+    }
+
+    .doc-link strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .doc-link span {
+      font-size: 13px;
+      color: var(--ink-muted);
+    }
+
+    .footer {
+      padding: 20px 32px;
+      background: var(--surface-subtle);
+      border-top: 1px solid var(--border-soft);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
       flex-wrap: wrap;
+      font-size: 12.5px;
+      color: var(--ink-subtle);
     }
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text);
-      font-weight: 800;
-      font-size: 17px;
-      text-decoration: none;
-    }
-    .brand img { width: 32px; height: 32px; border-radius: 9px; }
-    .nav { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; }
-    .nav a { color: var(--muted); text-decoration: none; }
-    .nav a:hover, .nav a.active { color: var(--accent); }
-    .btn-admin {
-      padding: 8px 14px;
-      border-radius: 10px;
-      background: rgba(50, 215, 155, 0.14);
-      border: 1px solid rgba(50, 215, 155, 0.35);
-      color: var(--accent) !important;
-    }
-    .container { max-width: 1120px; margin: 0 auto; padding: 48px 20px 80px; }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.25fr 0.95fr;
-      gap: 32px;
-      align-items: center;
-      margin-bottom: 52px;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 13px;
-      border-radius: 999px;
-      background: rgba(50, 215, 155, 0.13);
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 16px;
-    }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #94a3b8;
-    }
-    .status-dot.ok { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-    h1 {
-      margin: 0 0 14px;
-      font-size: clamp(30px, 4vw, 44px);
-      line-height: 1.15;
-      letter-spacing: -0.025em;
-    }
-    .lead { color: var(--muted); font-size: 16.5px; margin: 0 0 24px; }
-    .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 18px;
-      border-radius: 12px;
-      font-weight: 700;
-      font-size: 14px;
-      text-decoration: none;
-    }
-    .btn-primary { background: var(--accent); color: var(--accent-dark); }
-    .btn-secondary {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .trust-panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 24px;
-    }
-    .trust-panel h2 { margin: 0 0 14px; font-size: 17px; color: var(--text); }
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }
-    .metric {
-      background: var(--surface-alt);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 14px;
-      padding: 14px;
-    }
-    .metric-val { font-size: 17px; font-weight: 800; color: var(--accent); }
-    .metric-lbl { font-size: 12px; color: var(--muted); margin-top: 3px; }
-    .section-title { font-size: 22px; margin: 0 0 18px; letter-spacing: -0.015em; }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-      margin-bottom: 44px;
-    }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 22px;
-    }
-    .card h3 { margin: 0 0 8px; font-size: 16.5px; color: var(--text); }
-    .card p { margin: 0; font-size: 14px; color: var(--muted); }
-    .card a { color: var(--accent); font-size: 13.5px; font-weight: 600; display: inline-block; margin-top: 12px; text-decoration: none; }
-    .footer {
-      border-top: 1px solid var(--border);
-      padding-top: 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .footer a { color: var(--accent); text-decoration: none; margin-left: 14px; }
-    @media (max-width: 860px) {
-      .hero { grid-template-columns: 1fr; }
-      .grid-3 { grid-template-columns: 1fr; }
+
+    @media (max-width: 820px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+      .grid-3,
+      .grid-2,
+      .doc-links {
+        grid-template-columns: 1fr;
+      }
+      .topbar,
+      .hero,
+      .section,
+      .footer {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
     }
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
+  <main class="sheet">
+    <header class="topbar">
       <a class="brand" href="/">
-        <img src="/logo.png" alt="Logo Forma" onerror="this.style.display='none'" />
-        <span>Forma</span>
+        <img src="/logo.png" alt="Forma" />
+        <div>
+          <span class="brand-title">Forma</span>
+          <span class="brand-sub">Plataforma de Nutrição e Treino</span>
+        </div>
       </a>
-      <nav class="nav" aria-label="Navegação Principal">
-        <a href="/" class="active">Início</a>
-        <a href="/docs">Documentação Completa</a>
-        <a href="/privacy">Privacidade & LGPD</a>
-        <a href="/terms">Termos & Avisos</a>
-        <a href="/admin/" class="btn-admin">Console Admin</a>
+      <nav class="nav" aria-label="Navegação principal">
+        <a href="/privacy.html">Privacidade</a>
+        <a href="/terms.html">Termos de Uso</a>
+        <a href="/docs.html">Documentação</a>
+        <a class="nav-primary" href="/admin/">Painel Administrativo</a>
       </nav>
-    </div>
-  </header>
+    </header>
 
-  <main class="container">
     <section class="hero">
       <div>
-        <span class="pill">
-          <span class="status-dot" id="apiDot"></span>
-          <span id="apiStatusText">Verificando status da API...</span>
-        </span>
-        <h1>Nutrição, Hidratação e Treinos com Arquitetura Blindada e LGPD by Design.</h1>
-        <p class="lead">O ecossistema <strong>Forma</strong> reúne aplicativo nativo iOS/watchOS, Live Activities na Ilha Dinâmica, sincronização criptografada em nuvem (Spring Boot + PostgreSQL RLS) e IA opcional com consentimento auditável.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="/docs">Explorar Documentação Técnica</a>
-          <a class="btn btn-secondary" href="/privacy">Central LGPD &amp; Privacidade</a>
+        <div class="eyebrow">Serviços Forma</div>
+        <h1>Nutrição clínica, treino e acompanhamento contínuo</h1>
+        <p class="lead">
+          Portal oficial dos serviços de sincronização, análise nutricional assistida por inteligência artificial, gestão de assinaturas e conformidade com a LGPD do aplicativo Forma.
+        </p>
+        <div class="actions">
+          <a class="btn-primary" href="/admin/">Acessar Painel Administrativo</a>
+          <a class="btn-secondary" href="/privacy.html">Política de Privacidade</a>
         </div>
       </div>
 
-      <aside class="trust-panel" aria-label="Garantias de Segurança e Compliance">
-        <h2>Trust Center &amp; Segurança</h2>
-        <div class="metric-grid">
-          <div class="metric">
-            <div class="metric-val">AES-256-GCM</div>
-            <div class="metric-lbl">Criptografia em repouso de tokens OAuth, IPs MCI e segredos de API</div>
+      <aside class="status-box" aria-label="Disponibilidade da plataforma">
+        <div class="status-row">
+          <span class="status-label">Disponibilidade</span>
+          <span class="status-value">
+            <span class="dot" id="health-dot"></span>
+            <span id="health-text">Verificando serviço</span>
+          </span>
+        </div>
+        <div class="meta-list">
+          <div class="meta-item">
+            <span>Sincronização</span>
+            <span>Ativa</span>
           </div>
-          <div class="metric">
-            <div class="metric-val">RLS 100%</div>
-            <div class="metric-lbl">Row-Level Security e isolamento estrito por <code>user_id</code> no Supabase</div>
+          <div class="meta-item">
+            <span>Privacidade</span>
+            <span>LGPD</span>
           </div>
-          <div class="metric">
-            <div class="metric-val">Opt-In Granular</div>
-            <div class="metric-lbl">Ledger imutável SHA-256 sem envio silencioso de dados para IA</div>
-          </div>
-          <div class="metric">
-            <div class="metric-val">180 Dias MCI</div>
-            <div class="metric-lbl">Guarda cifrada Art. 15 Lei 12.965/2014 com expurgo diário automático</div>
+          <div class="meta-item">
+            <span>Horário local</span>
+            <span id="clock-value">--:--</span>
           </div>
         </div>
       </aside>
     </section>
 
-    <h2 class="section-title">Pilares do Sistema &amp; Compliance</h2>
-    <section class="grid-3">
-      <article class="card">
-        <h3>Arquitetura &amp; API Documentadas</h3>
-        <p>Especificação completa das rotas REST/WebSocket, esquema de 16 tabelas PostgreSQL, diagramas de fluxo e guia de variáveis de produção.</p>
-        <a href="/docs">Abrir /docs →</a>
-      </article>
-      <article class="card">
-        <h3>Governança LGPD, ANPD &amp; Portabilidade</h3>
-        <p>Consentimento destacado Art. 11, minimização de PII e remoção de EXIF antes da IA, exportação JSON (Art. 18 V) e exclusão com tombstone anti-ressurreição.</p>
-        <a href="/privacy">Abrir /privacy →</a>
-      </article>
-      <article class="card">
-        <h3>Travas CFN, CONFEF, CFM &amp; CDC</h3>
-        <p>Restrição etária 18+, caráter exclusivamente educacional, piso seguro de 1.200 kcal/dia, proteção IMC ≥ 18,5 e remoção de carga absoluta em lesões.</p>
-        <a href="/terms">Abrir /terms →</a>
-      </article>
+    <section class="section">
+      <div class="section-head">
+        <h2>Planos vigentes</h2>
+        <span class="section-note" id="plans-source">Valores consultados diretamente do catálogo ativo</span>
+      </div>
+      <div class="grid-2" id="plans-grid">
+        <div class="panel">
+          <h3>Carregando catálogo de planos...</h3>
+          <p>Aguarde enquanto os valores vigentes são consultados no servidor.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Infraestrutura operacional</h2>
+      </div>
+      <div class="grid-3">
+        <article class="panel">
+          <h3>Análise Nutricional e Treino</h3>
+          <p>Processamento de refeições por texto ou imagem e geração de rotinas personalizadas diretamente pela conta do usuário.</p>
+        </article>
+        <article class="panel">
+          <h3>Assinaturas e Cupons</h3>
+          <p>Gestão centralizada de planos, campanhas promocionais, períodos gratuitos e cobranças com atualização imediata no aplicativo.</p>
+        </article>
+        <article class="panel">
+          <h3>Conformidade e Controle</h3>
+          <p>Registro de consentimentos, portabilidade integral de dados em formato JSON e exclusão definitiva sob solicitação.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Documentos e acessos</h2>
+      </div>
+      <div class="doc-links">
+        <a class="doc-link" href="/admin/">
+          <strong>Painel Administrativo</strong>
+          <span>Gestão financeira, assinantes, cupons e operação de IA.</span>
+        </a>
+        <a class="doc-link" href="/privacy.html">
+          <strong>Privacidade &amp; LGPD</strong>
+          <span>Diretrizes de dados de saúde, exportação JSON e direitos do titular.</span>
+        </a>
+        <a class="doc-link" href="/terms.html">
+          <strong>Termos de Uso</strong>
+          <span>Condições comerciais de assinatura, renovação e suporte.</span>
+        </a>
+      </div>
     </section>
 
     <footer class="footer">
-      <span>Forma © 2026 • Contato DPO: <a href="mailto:privacidade@forma.app" style="margin-left:4px;">privacidade@forma.app</a></span>
-      <div>
-        <a href="/docs">Documentação</a>
-        <a href="/privacy">Privacidade</a>
-        <a href="/terms">Termos</a>
-        <a href="/api/health">Health API</a>
-      </div>
+      <span>Forma</span>
+      <span>Todos os dados operacionais seguem as diretrizes da LGPD.</span>
     </footer>
   </main>
 
   <script>
-    (function checkHealth() {
-      var dot = document.getElementById('apiDot');
-      var txt = document.getElementById('apiStatusText');
+    (function () {
+      function updateClock() {
+        var el = document.getElementById('clock-value');
+        if (el) {
+          el.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        }
+      }
+
+      function formatCurrency(cents) {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((cents || 0) / 100);
+      }
+
+      function escapeHtml(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      updateClock();
+      setInterval(updateClock, 30000);
+
       fetch('/api/health', { cache: 'no-store' })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d && d.status === 'ok') {
-            dot.classList.add('ok');
-            txt.textContent = 'API Forma Operacional • TLS & Headers Ativos';
+        .then(function (res) {
+          var dot = document.getElementById('health-dot');
+          var text = document.getElementById('health-text');
+          if (res.ok) {
+            dot.classList.add('is-ok');
+            text.textContent = 'Serviço operacional';
           } else {
-            txt.textContent = 'API Forma em verificação';
+            dot.classList.add('is-down');
+            text.textContent = 'Manutenção em andamento';
           }
         })
         .catch(function () {
-          txt.textContent = 'Status da API indisponível no momento';
+          var dot = document.getElementById('health-dot');
+          var text = document.getElementById('health-text');
+          dot.classList.add('is-down');
+          text.textContent = 'Indisponível no momento';
+        });
+
+      fetch('/api/subscriptions/catalog', { cache: 'no-store' })
+        .then(function (res) {
+          if (!res.ok) throw new Error('catalog unavailable');
+          return res.json();
+        })
+        .then(function (data) {
+          var grid = document.getElementById('plans-grid');
+          var plans = Array.isArray(data && data.plans) ? data.plans : [];
+          if (!plans.length) {
+            grid.innerHTML = '<div class="panel"><h3>Forma Pro</h3><p>Consulte os planos disponíveis diretamente no aplicativo.</p></div>';
+            return;
+          }
+          grid.innerHTML = plans.map(function (plan) {
+            var intervalLabel = plan.billingInterval === 'YEARLY' ? 'por ano' : 'por mês';
+            var trialBadge = plan.trialDays > 0
+              ? '<span class="plan-trial">' + escapeHtml(plan.trialDays) + ' dias grátis na adesão</span>'
+              : '';
+            return '<article class="panel">' +
+              '<h3>' + escapeHtml(plan.name) + '</h3>' +
+              '<div class="plan-price">' + escapeHtml(formatCurrency(plan.priceCents)) + ' <span class="plan-period">' + escapeHtml(intervalLabel) + '</span></div>' +
+              '<p>' + escapeHtml(plan.description) + '</p>' +
+              trialBadge +
+              '</article>';
+          }).join('');
+        })
+        .catch(function () {
+          var grid = document.getElementById('plans-grid');
+          grid.innerHTML = '<div class="panel"><h3>Forma Pro</h3><p>Disponível no aplicativo Forma para iOS.</p></div>';
         });
     })();
   </script>

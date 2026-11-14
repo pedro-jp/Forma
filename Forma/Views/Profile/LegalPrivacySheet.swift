@@ -118,7 +118,7 @@ struct LegalPrivacySheet: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 8) {
                                 Image(systemName: "heart.text.square.fill")
-                                    .foregroundStyle(FormaTheme.Colors.energyGreen)
+                                    .foregroundStyle(FormaTheme.Colors.brandInk)
                                 Text("Integração com o Apple Saúde")
                                     .font(.headline)
                                     .foregroundStyle(FormaTheme.Colors.primaryText)
@@ -150,27 +150,37 @@ struct LegalPrivacySheet: View {
                                 if let mifflinURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/") {
                                     Link("• Taxa Metabólica Basal — Equação de Mifflin-St Jeor (PubMed)", destination: mifflinURL)
                                         .font(.caption)
-                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .foregroundStyle(FormaTheme.Colors.brandInk)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 if let tacoURL = URL(string: "https://www.cfn.org.br/wp-content/uploads/2017/03/taco_4_edicao_ampliada_e_revisada.pdf") {
                                     Link("• Composição de Alimentos — Tabela TACO 4ª ed. (NEPA/UNICAMP)", destination: tacoURL)
                                         .font(.caption)
-                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .foregroundStyle(FormaTheme.Colors.brandInk)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 if let whoURL = URL(string: "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight") {
                                     Link("• Classificação de IMC & Peso Saudável — OMS (WHO)", destination: whoURL)
                                         .font(.caption)
-                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .foregroundStyle(FormaTheme.Colors.brandInk)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 if let metURL = URL(string: "https://pacompendium.com/") {
                                     Link("• Gasto Calórico em Exercícios (METs) — Compendium of Physical Activities", destination: metURL)
                                         .font(.caption)
-                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .foregroundStyle(FormaTheme.Colors.brandInk)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 if let issnURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/28642676/") {
                                     Link("• Proteínas e Exercício Físico — ISSN Position Stand (PubMed)", destination: issnURL)
                                         .font(.caption)
-                                        .foregroundStyle(FormaTheme.Colors.brand)
+                                        .foregroundStyle(FormaTheme.Colors.brandInk)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .padding(.top, 2)
@@ -352,10 +362,10 @@ struct LegalPrivacySheet: View {
     private func isLegacyOrOfflineFallbackError(_ error: Error) -> Bool {
         if let apiError = error as? FormaAPIError {
             switch apiError {
-            case .unreachableServer:
+            case .unreachableServer, .unauthorized:
                 return true
             case .serverError(let statusCode, let message):
-                return statusCode == 404 || message.localizedCaseInsensitiveContains("No static resource")
+                return statusCode == 401 || statusCode == 404 || message.localizedCaseInsensitiveContains("No static resource")
             default:
                 break
             }
@@ -387,7 +397,11 @@ struct LegalPrivacySheet: View {
         } catch {
             if isLegacyOrOfflineFallbackError(error) {
                 _ = await pullAndBuildLocalFallbackPayload()
-                fallbackNoticeMessage = "Exibindo registros sincronizados no dispositivo (atualização da nuvem em andamento)."
+                if case FormaAPIError.unauthorized? = error as? FormaAPIError {
+                    fallbackNoticeMessage = "Sessão da nuvem expirada ou trocada de ambiente — exibindo e liberando a exportação dos dados salvos neste aparelho."
+                } else {
+                    fallbackNoticeMessage = "Exibindo registros sincronizados no dispositivo (atualização da nuvem em andamento)."
+                }
             } else {
                 exportErrorMessage = error.localizedDescription
             }

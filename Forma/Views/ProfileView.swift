@@ -27,7 +27,6 @@ struct ProfileView: View {
 
     @ObservedObject private var authManager = AuthManager.shared
     @ObservedObject private var syncManager = BackendSyncManager.shared
-    @ObservedObject private var realtimeSocket = AccountRealtimeSocketManager.shared
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     var body: some View {
@@ -152,9 +151,7 @@ struct ProfileView: View {
             .task {
                 let active = FormaDataStore.shared.ensureSingleProfile(in: modelContext)
                 syncInputStrings(from: active)
-                if authManager.isAuthenticated {
-                    await subscriptionManager.refreshMySubscription()
-                }
+                await subscriptionManager.refreshAllBeforeDisplay()
             }
         }
     }
@@ -207,11 +204,11 @@ struct ProfileView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text(authManager.isPro ? "Forma Pro" : "Camada Essencial")
+                            Text(authManager.isPro ? "Forma Pro" : "Plano Essencial")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundStyle(FormaTheme.Colors.primaryText)
 
-                            Text(authManager.isPro ? "PRO" : "FREE")
+                            Text(authManager.isPro ? "PRO" : "ESSENCIAL")
                                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundStyle(authManager.isPro ? .white : FormaTheme.Colors.brand)
                                 .padding(.horizontal, 7)
@@ -222,18 +219,6 @@ struct ProfileView: View {
                                         : AnyShapeStyle(FormaTheme.Colors.brandSoft)
                                 )
                                 .clipShape(Capsule())
-
-                            if realtimeSocket.isConnected {
-                                HStack(spacing: 4) {
-                                    Circle()
-                                        .fill(FormaTheme.Colors.energyGreen)
-                                        .frame(width: 6, height: 6)
-                                    Text("Ao vivo")
-                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(FormaTheme.Colors.energyGreen)
-                                }
-                                .padding(.leading, 2)
-                            }
                         }
 
                         Text(authManager.isPro ? "Todas as funções de Inteligência Forma ativas" : "Visual simplificado e direto para o dia a dia")
@@ -246,7 +231,8 @@ struct ProfileView: View {
                     Button {
                         Task { @MainActor in
                             await syncManager.sync(context: modelContext, forcePull: true)
-                            showToast("Camada da conta atualizada (\(authManager.accountTier.displayName))")
+                            await subscriptionManager.refreshAllBeforeDisplay()
+                            showToast("Dados da assinatura atualizados.")
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -261,19 +247,53 @@ struct ProfileView: View {
 
                 Text(
                     authManager.isPro
-                        ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e análise educacional de evolução via Google Gemini (sem caráter diagnóstico)."
-                        : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. Assine ou resgate um cupom promocional para liberar a IA."
+                        ? "Inclui reconhecimento por foto do prato, registro por voz com ondas reativas, criador de fichas com IA e análise educacional de evolução com inteligência artificial (sem caráter diagnóstico)."
+                        : "Acesso completo à busca na Tabela TACO, hidratação, fichas manuais com catálogo 3D, Ilha Dinâmica e gráficos. Assine o Forma Pro para liberar todos os recursos avançados de IA."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
                 if let sub = subscriptionManager.currentSubscription {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: sub.appliedCouponCode != nil ? "ticket.fill" : "calendar.badge.clock")
+                                .font(.caption)
+                                .foregroundStyle(FormaTheme.Colors.brandInk)
+                            Text(subscriptionSummaryLine(sub))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(FormaTheme.Colors.primaryText)
+                        }
+                        if let nextDiscount = sub.nextBillingDiscountLabel, !nextDiscount.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(FormaTheme.Colors.aiAccent)
+                                Text(
+                                    sub.nextBillingPriceCents.map {
+                                        "Próxima cobrança: \(nextDiscount) (\(formatBrlPrice($0)))"
+                                    } ?? "Próxima cobrança: \(nextDiscount)"
+                                )
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(FormaTheme.Colors.aiAccent)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.045))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else if let monthlyPlan = subscriptionManager.plans.first {
                     HStack(spacing: 8) {
-                        Image(systemName: sub.appliedCouponCode != nil ? "ticket.fill" : "calendar.badge.clock")
+                        Image(systemName: "tag.fill")
                             .font(.caption)
-                            .foregroundStyle(FormaTheme.Colors.brand)
-                        Text(subscriptionSummaryLine(sub))
+                            .foregroundStyle(FormaTheme.Colors.brandInk)
+                        Text(
+                            monthlyPlan.defaultTrialDays > 0
+                                ? "\(monthlyPlan.name): \(formatBrlPrice(monthlyPlan.priceCents))/mês • \(monthlyPlan.defaultTrialDays) dias grátis"
+                                : "\(monthlyPlan.name): \(formatBrlPrice(monthlyPlan.priceCents))/mês"
+                        )
                             .font(.caption.weight(.medium))
                             .foregroundStyle(FormaTheme.Colors.primaryText)
                     }
@@ -285,11 +305,14 @@ struct ProfileView: View {
                 }
 
                 Button {
+                    Task { @MainActor in
+                        await subscriptionManager.refreshAllBeforeDisplay()
+                    }
                     showSubscriptionSheet = true
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: authManager.isPro ? "slider.horizontal.3" : "crown.fill")
-                        Text(authManager.isPro ? "Gerenciar Assinatura, Planos & Cupons" : "Assinar Forma Pro ou Usar Cupom Grátis")
+                        Text(authManager.isPro ? "Gerenciar Assinatura" : "Conhecer o Forma Pro")
                             .font(.subheadline.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
@@ -330,7 +353,7 @@ struct ProfileView: View {
                         Button {
                             showSubscriptionSheet = true
                         } label: {
-                            Text("Regularizar / Usar Cupom")
+                            Text("Regularizar Assinatura")
                                 .font(.caption.weight(.bold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
@@ -362,11 +385,22 @@ struct ProfileView: View {
 
     private func subscriptionSummaryLine(_ sub: UserSubscriptionStatusInfo) -> String {
         var parts: [String] = [sub.planName ?? "Forma Pro"]
-        parts.append("Status: \(sub.status)")
+        parts.append(SubscriptionManager.localizedStatusLabel(sub.status))
+        if sub.priceCents > 0 {
+            parts.append(formatBrlPrice(sub.priceCents))
+        }
         if let coupon = sub.appliedCouponCode, !coupon.isEmpty {
             parts.append("Cupom: \(coupon)")
         }
         return parts.joined(separator: " • ")
+    }
+
+    private func formatBrlPrice(_ cents: Int) -> String {
+        let value = Double(cents) / 100.0
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.numberStyle = .currency
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "R$ %.2f", value)
     }
 
     private func fitnessGoalCard(@Bindable profile: Profile) -> some View {
@@ -432,7 +466,7 @@ struct ProfileView: View {
                         .foregroundStyle(FormaTheme.Colors.primaryText)
                     Spacer()
                     if authManager.isAuthenticated {
-                        FormaBadge(text: "Ativa", tint: FormaTheme.Colors.energyGreen)
+                        FormaBadge(text: "Ativa", tint: FormaTheme.Colors.brandInk)
                     }
                 }
 

@@ -1,12 +1,16 @@
 package com.forma.backend.websocket;
 
+import com.forma.backend.entity.AdminAuditLogEntity;
 import com.forma.backend.entity.AiRequestLogEntity;
+import com.forma.backend.entity.SecurityIncidentLogEntity;
 import com.forma.backend.entity.User;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -30,49 +34,95 @@ public class AdminEventPublisherService {
     }
 
     public void publishAiRequest(AiRequestLogEntity log, long totalAiRequests) {
-        webSocketHandler.broadcast("AI_REQUEST", Map.of(
-            "id", log.getId(),
-            "userId", log.getUserId(),
-            "endpoint", log.getEndpoint(),
-            "promptSummary", "[Solicitação autenticada — conteúdo protegido pela LGPD]",
-            "status", log.getStatus(),
-            "durationMs", log.getDurationMs(),
-            "createdAt", log.getCreatedAt().toString(),
-            "totalAiRequests", totalAiRequests
-        ));
+        if (log == null) return;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", log.getId());
+        payload.put("userId", log.getUserId());
+        payload.put("endpoint", log.getEndpoint());
+        payload.put("promptSummary", "[Solicitação autenticada — conteúdo protegido pela LGPD]");
+        payload.put("status", log.getStatus());
+        payload.put("durationMs", log.getDurationMs());
+        payload.put("createdAt", (log.getCreatedAt() != null ? log.getCreatedAt() : Instant.now()).toString());
+        payload.put("totalAiRequests", totalAiRequests);
+        runAfterCommitOrNow(() -> {
+            if (webSocketHandler != null) webSocketHandler.broadcast("AI_REQUEST", payload);
+        });
     }
 
     public void publishUserActivity(String event, String email, String name, String authProvider, long totalUsers) {
-        webSocketHandler.broadcast("USER_ACTIVITY", Map.of(
-            "event", event,
+        Map<String, Object> payload = Map.of(
+            "event", event != null ? event : "UPDATED",
             "email", maskEmail(email),
             "name", maskName(name),
             "authProvider", authProvider != null ? authProvider : "EMAIL",
             "totalUsers", totalUsers
-        ));
+        );
+        runAfterCommitOrNow(() -> {
+            if (webSocketHandler != null) webSocketHandler.broadcast("USER_ACTIVITY", payload);
+        });
     }
 
     public void publishSyncActivity(String entityType, int count, long totalFoods, long totalWorkouts) {
-        webSocketHandler.broadcast("SYNC_ACTIVITY", Map.of(
-            "entityType", entityType,
+        Map<String, Object> payload = Map.of(
+            "entityType", entityType != null ? entityType : "SYNC",
             "count", count,
             "totalFoods", totalFoods,
             "totalWorkouts", totalWorkouts
-        ));
+        );
+        runAfterCommitOrNow(() -> {
+            if (webSocketHandler != null) webSocketHandler.broadcast("SYNC_ACTIVITY", payload);
+        });
     }
 
     public void publishKillSwitchState(boolean isBlocked) {
-        webSocketHandler.broadcast("KILL_SWITCH_CHANGED", Map.of(
+        Map<String, Object> payload = Map.of(
             "isBlocked", isBlocked,
-            "message", isBlocked ? "⛔️ Requisições à API de IA foram BLOQUEADAS" : "🟢 Requisições à API de IA foram LIBERADAS"
-        ));
+            "message", isBlocked ? "Requisições à API de IA foram BLOQUEADAS" : "Requisições à API de IA foram LIBERADAS"
+        );
+        runAfterCommitOrNow(() -> {
+            if (webSocketHandler != null) {
+                webSocketHandler.broadcast("KILL_SWITCH_CHANGED", payload);
+            }
+            if (userAccountWebSocketHandler != null) {
+                userAccountWebSocketHandler.broadcastGlobalAiState(isBlocked);
+            }
+        });
     }
 
     public void publishConfigUpdated(String keyMasked, String model) {
-        webSocketHandler.broadcast("CONFIG_UPDATED", Map.of(
-            "activeApiKeyMasked", keyMasked,
-            "geminiModel", model
-        ));
+        Map<String, Object> payload = Map.of(
+            "activeApiKeyMasked", keyMasked != null ? keyMasked : "Não configurada",
+            "geminiModel", model != null ? model : ""
+        );
+        runAfterCommitOrNow(() -> {
+            if (webSocketHandler != null) webSocketHandler.broadcast("CONFIG_UPDATED", payload);
+        });
+    }
+
+    public void publishAdminAuditLog(AdminAuditLogEntity audit) {
+        if (audit == null || webSocketHandler == null) return;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", audit.getId());
+        payload.put("adminActor", audit.getAdminActor());
+        payload.put("actionType", audit.getActionType());
+        payload.put("targetRef", audit.getTargetRef() != null ? audit.getTargetRef() : "");
+        payload.put("detailSummary", audit.getDetailSummary() != null ? audit.getDetailSummary() : "");
+        payload.put("createdAtUtc", (audit.getCreatedAtUtc() != null ? audit.getCreatedAtUtc() : Instant.now()).toString());
+        runAfterCommitOrNow(() -> webSocketHandler.broadcast("AUDIT_LOG_CREATED", payload));
+    }
+
+    public void publishSecurityIncident(SecurityIncidentLogEntity inc) {
+        if (inc == null || webSocketHandler == null) return;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", inc.getId());
+        payload.put("severity", inc.getSeverity());
+        payload.put("incidentType", inc.getIncidentType());
+        payload.put("affectedCategories", inc.getAffectedCategories() != null ? inc.getAffectedCategories() : "");
+        payload.put("description", inc.getDescription());
+        payload.put("mitigationActions", inc.getMitigationActions() != null ? inc.getMitigationActions() : "");
+        payload.put("anpdNotified", inc.isAnpdNotified());
+        payload.put("detectedAtUtc", (inc.getDetectedAtUtc() != null ? inc.getDetectedAtUtc() : Instant.now()).toString());
+        runAfterCommitOrNow(() -> webSocketHandler.broadcast("SECURITY_INCIDENT_CREATED", payload));
     }
 
     public void publishUserAccountState(User user, String eventName) {
@@ -100,11 +150,18 @@ public class AdminEventPublisherService {
     }
 
     public void publishBillingUpdated(String reason) {
-        if (webSocketHandler == null) return;
-        runAfterCommitOrNow(() -> webSocketHandler.broadcast("BILLING_UPDATED", Map.of(
-            "reason", reason != null ? reason : "UPDATED",
-            "timestamp", java.time.Instant.now().toString()
-        )));
+        runAfterCommitOrNow(() -> {
+            String effectiveReason = reason != null ? reason : "UPDATED";
+            if (webSocketHandler != null) {
+                webSocketHandler.broadcast("BILLING_UPDATED", Map.of(
+                    "reason", effectiveReason,
+                    "timestamp", java.time.Instant.now().toString()
+                ));
+            }
+            if (userAccountWebSocketHandler != null) {
+                userAccountWebSocketHandler.broadcastCatalogUpdated(effectiveReason);
+            }
+        });
     }
 
     public void publishUserAccountDeleted(UUID userId) {

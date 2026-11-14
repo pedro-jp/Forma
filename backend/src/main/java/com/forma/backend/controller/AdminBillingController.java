@@ -145,6 +145,44 @@ public class AdminBillingController {
         return ResponseEntity.ok(updated);
     }
 
+    @PostMapping("/subscriptions/next-discount")
+    public ResponseEntity<UserSubscriptionStatusDto> applyNextBillingDiscount(
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken,
+        @RequestBody ApplyNextBillingDiscountRequest req
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        UserSubscriptionStatusDto updated = billingService.applyNextBillingDiscount(req, configuredAdminUsername);
+        mciAccessLogService.recordAdminAudit(
+            configuredAdminUsername,
+            "ADMIN_NEXT_BILLING_DISCOUNT",
+            updated.userId(),
+            updated.nextBillingDiscountLabel() != null ? updated.nextBillingDiscountLabel() : "Desconto próxima cobrança",
+            request
+        );
+        return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/subscriptions/{subscriptionId}/next-discount")
+    public ResponseEntity<UserSubscriptionStatusDto> clearNextBillingDiscount(
+        @PathVariable UUID subscriptionId,
+        HttpServletRequest request,
+        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+        @CookieValue(value = AuthContextResolver.ADMIN_COOKIE_NAME, required = false) String cookieToken
+    ) {
+        authContextResolver.requireAdmin(request, adminKey, cookieToken);
+        UserSubscriptionStatusDto updated = billingService.clearNextBillingDiscount(subscriptionId, configuredAdminUsername);
+        mciAccessLogService.recordAdminAudit(
+            configuredAdminUsername,
+            "ADMIN_CLEAR_NEXT_BILLING_DISCOUNT",
+            subscriptionId.toString(),
+            "Desconto da próxima cobrança removido",
+            request
+        );
+        return ResponseEntity.ok(updated);
+    }
+
     @PostMapping("/subscriptions/{subscriptionId}/simulate-overdue")
     public ResponseEntity<UserSubscriptionStatusDto> simulateOverdue(
         @PathVariable UUID subscriptionId,
@@ -223,6 +261,7 @@ public class AdminBillingController {
             appConfigService.setBillingOverdueAction(req.overdueAction());
         }
         String effective = appConfigService.getBillingOverdueAction();
+        billingService.notifyBillingPolicyUpdated(effective);
         mciAccessLogService.recordAdminAudit(configuredAdminUsername, "BILLING_POLICY_UPDATED", (String) null, "overdueAction=" + effective, request);
         return ResponseEntity.ok(Map.of("overdueAction", effective));
     }

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Lock, Shield, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { AlertCircle, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 interface LoginModalProps {
   onLoginSuccess: (username: string) => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess }) => {
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,166 +30,117 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess }) => {
       if (resp.ok) {
         onLoginSuccess(data.username || username);
       } else {
-        setError(data.error || 'Credenciais inválidas. Verifique usuário e senha.');
+        setError(data.error || data.message || 'Credenciais inválidas. Verifique usuário e senha.');
       }
-    } catch (err: any) {
-      setError('Erro de conexão com o servidor Forma. Verifique se o backend está online.');
+    } catch {
+      setError('Não foi possível conectar ao backend Forma. Verifique se o servidor está ativo.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      backgroundColor: 'rgba(5, 8, 15, 0.85)',
-      backdropFilter: 'blur(20px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '20px'
-    }}>
-      <div className="glass-card" style={{
-        maxWidth: '440px',
-        width: '100%',
-        padding: '36px',
-        borderRadius: '24px',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)'
-      }}>
-        {/* Brand Header */}
-        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '6px 14px',
-            borderRadius: '999px',
-            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            color: '#10b981',
-            fontSize: '13px',
-            fontWeight: 700,
-            marginBottom: '16px'
-          }}>
-            <Sparkles size={16} /> Forma Live Ops
+    <main className="auth-viewport">
+      <section className="auth-card" aria-labelledby="login-heading">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+          <div className="brand-mark" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="2" width="12" height="2.6" rx="1" fill="currentColor" />
+              <rect x="2" y="6.7" width="8.5" height="2.6" rx="1" fill="currentColor" />
+              <rect x="2" y="11.4" width="3.2" height="2.6" rx="1" fill="currentColor" />
+            </svg>
           </div>
-          <h2 style={{ fontSize: '26px', fontWeight: 800, letterSpacing: '-0.5px', marginBottom: '8px' }}>
-            Painel Administrativo
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-            Controle em tempo real de telemetria, proxy Gemini AI e kill-switch global.
-          </p>
+          <div>
+            <div className="brand-title">Forma</div>
+            <div className="brand-scope">Console Administrativo</div>
+          </div>
         </div>
 
+        <h1 id="login-heading" className="page-title" style={{ marginBottom: '4px' }}>
+          Entrar no console
+        </h1>
+        <p className="page-subtitle" style={{ marginBottom: '22px' }}>
+          Gerenciamento de planos, preços, assinaturas, cupons e proxy Gemini.
+        </p>
+
         {error && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            backgroundColor: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#f87171',
-            padding: '12px 16px',
-            borderRadius: '12px',
-            fontSize: '13px',
-            marginBottom: '20px'
-          }}>
-            <AlertCircle size={18} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
+          <div className="notice-banner notice-neg" role="alert" style={{ marginBottom: '18px' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              {error}
+            </span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-              Usuário Administrador
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="field">
+            <label htmlFor="admin-username" className="field-label">
+              Usuário administrador
             </label>
             <input
+              id="admin-username"
+              className="input"
               type="text"
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="ex: admin"
+              placeholder="Seu usuário"
               required
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                color: '#fff',
-                fontSize: '14px'
-              }}
             />
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-              Senha de Acesso
+          <div className="field">
+            <label htmlFor="admin-password" className="field-label">
+              Senha de acesso
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                color: '#fff',
-                fontSize: '14px'
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="admin-password"
+                className="input"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Digite sua senha"
+                required
+                style={{ paddingRight: '38px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--faint)',
+                  padding: '4px',
+                  display: 'inline-flex'
+                }}
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-              width: '100%',
-              padding: '14px',
-              borderRadius: '12px',
-              backgroundColor: '#10b981',
-              color: '#042f1a',
-              fontWeight: 700,
-              fontSize: '15px',
-              border: 'none',
-              marginTop: '6px',
-              boxShadow: '0 4px 18px rgba(16, 185, 129, 0.35)'
-            }}
+            className="btn btn-primary"
+            style={{ width: '100%', height: '38px', marginTop: '6px' }}
           >
-            {loading ? 'Autenticando...' : (
-              <>
-                <span>Acessar Painel</span>
-                <ArrowRight size={18} />
-              </>
-            )}
+            <span>{loading ? 'Autenticando...' : 'Acessar console'}</span>
+            {!loading && <ArrowRight size={15} />}
           </button>
         </form>
 
-        <div style={{
-          marginTop: '24px',
-          textAlign: 'center',
-          fontSize: '12px',
-          color: 'var(--text-muted)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '6px'
-        }}>
-          <Shield size={14} />
-          <span>Sessão segura com Cookie HttpOnly e criptografia JWT</span>
-        </div>
-      </div>
-    </div>
+        <p style={{ marginTop: '20px', fontSize: '12px', color: 'var(--faint)', lineHeight: 1.5 }}>
+          Acesso restrito a administradores autorizados.
+        </p>
+      </section>
+    </main>
   );
 };

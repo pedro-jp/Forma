@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -24,18 +25,30 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 @Service
 public class SubscriptionBillingService {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionBillingService.class);
     private static final long THREE_DAYS_GRACE_HOURS = 72L;
+    private static final int MAX_COUPON_GLOBAL_LIMIT = 10_000;
+    private static final String COUPON_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private final AtomicBoolean defaultPlansEnsured = new AtomicBoolean(false);
+    private final AtomicBoolean legacyRecordsSanitized = new AtomicBoolean(false);
 
     private final SubscriptionPlanRepository planRepository;
     private final CouponRepository couponRepository;
@@ -77,6 +90,9 @@ public class SubscriptionBillingService {
 
     @PostConstruct
     public void ensureDefaultPlans() {
+        if (defaultPlansEnsured.get()) {
+            return;
+        }
         try {
             if (!planRepository.existsById("PRO_MONTHLY")) {
                 planRepository.save(new SubscriptionPlanEntity(
@@ -85,7 +101,7 @@ public class SubscriptionBillingService {
                     "Acesso completo à IA nutricional, análise visual de pratos, treinos e evolução em tempo real.",
                     "jota.Forma.pro.monthly",
                     "MONTHLY",
-                    2490,
+                    2990,
                     "BRL",
                     0,
                     true
@@ -104,8 +120,87 @@ public class SubscriptionBillingService {
                     true
                 ));
             }
+            defaultPlansEnsured.set(true);
+            if (legacyRecordsSanitized.compareAndSet(false, true)) {
+                sanitizeLegacyNonProdRecords();
+            }
         } catch (Exception e) {
             log.warn("[Billing] Aviso ao inicializar planos padrão: {}", e.getMessage());
+        }
+    }
+
+    private void sanitizeLegacyNonProdRecords() {
+        try {
+            for (UserSubscriptionEntity sub : subscriptionRepository.findAll()) {
+                String reason = sub.getStatusReason();
+                if (reason == null || reason.isBlank()) {
+                    continue;
+                }
+                String lower = reason.toLowerCase(Locale.ROOT);
+                if (lower.contains("storekit") || lower.contains("xcode") || lower.contains("sandbox")) {
+                    sub.setStatusReason("Assinatura App Store ativa");
+                    subscriptionRepository.save(sub);
+                } else if (lower.contains("simulação de inadimplência") || lower.contains("simulacao de inadimplencia")) {
+                    sub.setStatusReason("Aguardando regularização do pagamento.");
+                    subscriptionRepository.save(sub);
+                } else if (lower.contains("painel administrativo") || lower.contains("liberado pelo painel")) {
+                    sub.setStatusReason("Acesso Forma Pro ativo.");
+                    subscriptionRepository.save(sub);
+                }
+            }
+
+            for (PaymentEntryEntity entry : paymentEntryRepository.findAll()) {
+                boolean changed = false;
+                String desc = entry.getDescription();
+                if (desc != null) {
+                    String lowerDesc = desc.toLowerCase(Locale.ROOT);
+                    if (lowerDesc.contains("storekit") || lowerDesc.contains("xcode") || lowerDesc.contains("sandbox")) {
+                        int sep = desc.indexOf(" • ");
+                        String prefix = sep > 0 ? desc.substring(0, sep).trim() : "Forma Pro";
+                        entry.setDescription(prefix + " • App Store");
+                        changed = true;
+                    }
+                }
+                String createdBy = entry.getCreatedBy();
+                if (createdBy != null) {
+                    String lowerCreator = createdBy.toLowerCase(Locale.ROOT);
+                    if (lowerCreator.contains("storekit") || lowerCreator.equals("xcode") || lowerCreator.equals("sandbox")) {
+                        entry.setCreatedBy("App Store");
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    paymentEntryRepository.save(entry);
+                }
+            }
+
+            List<BillingWebhookEventEntity> simEvents = webhookEventRepository.findAll().stream()
+                .filter(ev -> "ADMIN_SIMULATOR".equalsIgnoreCase(ev.getProvider()))
+                .toList();
+            if (!simEvents.isEmpty()) {
+                webhookEventRepository.deleteAll(simEvents);
+            }
+
+            Instant now = Instant.now();
+            for (CouponEntity c : couponRepository.findAll()) {
+                boolean changed = false;
+                if (c.hasLegacyUnlimitedQuota()) {
+                    c.setMaxRedemptions(Math.max(1, c.getCurrentRedemptions()));
+                    changed = true;
+                }
+                if (c.isExhausted() && c.isActive()) {
+                    c.setActive(false);
+                    if (c.getExhaustedAtUtc() == null) {
+                        c.setExhaustedAtUtc(now);
+                    }
+                    changed = true;
+                }
+                if (changed) {
+                    couponRepository.save(c);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[Billing] Aviso ao higienizar registros legados: {}", e.getMessage());
         }
     }
 
@@ -113,9 +208,43 @@ public class SubscriptionBillingService {
 
     public List<PlanSummaryDto> listActivePlans() {
         ensureDefaultPlans();
-        return planRepository.findByActiveTrueOrderByPriceCentsAsc().stream()
+        List<SubscriptionPlanEntity> active = planRepository.findByActiveTrueOrderByPriceCentsAsc();
+        if (active.isEmpty() && planRepository.count() == 0) {
+            defaultPlansEnsured.set(false);
+            ensureDefaultPlans();
+            active = planRepository.findByActiveTrueOrderByPriceCentsAsc();
+        }
+        return active.stream()
             .map(PlanSummaryDto::fromEntity)
             .toList();
+    }
+
+    public LiveBillingCatalogDto getLiveBillingCatalog(UUID optionalUserId) {
+        ensureDefaultPlans();
+        Instant now = Instant.now();
+
+        List<SubscriptionPlanEntity> rawPlans = planRepository.findByActiveTrueOrderByPriceCentsAsc();
+        if (rawPlans.isEmpty() && planRepository.count() == 0) {
+            defaultPlansEnsured.set(false);
+            ensureDefaultPlans();
+            rawPlans = planRepository.findByActiveTrueOrderByPriceCentsAsc();
+        }
+
+        List<PlanSummaryDto> plans = rawPlans.stream()
+            .map(PlanSummaryDto::fromEntity)
+            .toList();
+
+        // Cupons não existem no catálogo público.
+        return new LiveBillingCatalogDto(
+            plans,
+            3,
+            appConfigService.getBillingOverdueAction(),
+            now.toString()
+        );
+    }
+
+    public void notifyBillingPolicyUpdated(String policy) {
+        eventPublisherService.publishBillingUpdated("POLICY_UPDATED:" + (policy != null ? policy : appConfigService.getBillingOverdueAction()));
     }
 
     public UserSubscriptionStatusDto getUserSubscriptionStatus(User user) {
@@ -127,33 +256,12 @@ public class SubscriptionBillingService {
             .toList();
 
         if (opt.isEmpty()) {
-            return new UserSubscriptionStatusDto(
-                null,
-                user.getId().toString(),
+            return UserSubscriptionStatusDto.freeDefault(
+                user.getId(),
                 user.getEmail(),
                 user.getAccountTier(),
-                "FREE",
-                user.isPro() ? "Forma Pro (Liberado pelo Painel)" : "Camada Essencial (Gratuita)",
-                "NONE",
-                user.isPro() ? "ACTIVE" : "FREE",
-                0,
-                "BRL",
-                null,
-                false,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                0,
-                0,
+                user.isPro(),
                 appConfigService.getBillingOverdueAction(),
-                user.isPro() ? "Acesso Pro ativo." : "Sem assinatura paga vinculada.",
-                false,
-                null,
-                null,
-                null,
                 notices
             );
         }
@@ -175,16 +283,16 @@ public class SubscriptionBillingService {
 
     // MARK: - Coupon Validation & Redemption
 
-    public CouponValidationResponse validateCoupon(UUID userId, String rawCode, String planId) {
+    public CouponValidationResponse validateCoupon(User user, String rawCode, String planId) {
         if (rawCode == null || rawCode.isBlank()) {
-            throw new IllegalArgumentException("Informe um código de cupom.");
+            throw new IllegalArgumentException("Informe um código promocional.");
         }
         String normalizedCode = rawCode.trim().toUpperCase(Locale.ROOT);
         CouponEntity coupon = couponRepository.findByCodeIgnoreCase(normalizedCode)
-            .orElseThrow(() -> new ResourceNotFoundException("Cupom \"" + normalizedCode + "\" não encontrado."));
+            .orElseThrow(() -> new IllegalArgumentException("Código promocional inválido, expirado ou esgotado."));
 
-        SubscriptionPlanEntity plan = resolvePlanOrDefault(planId);
-        validateCouponEligibility(coupon, userId, plan.getId());
+        SubscriptionPlanEntity plan = resolvePlanOrDefault(planId != null ? planId : coupon.getApplicablePlanId());
+        validateCouponEligibility(coupon, user, plan.getId(), Instant.now());
 
         int originalCents = plan.getPriceCents();
         int finalCents = calculateFinalPriceCents(originalCents, coupon);
@@ -208,21 +316,21 @@ public class SubscriptionBillingService {
     public RedeemCouponResponse redeemCoupon(User user, String rawCode, String planId) {
         ensureDefaultPlans();
         if (rawCode == null || rawCode.isBlank()) {
-            throw new IllegalArgumentException("Informe o código do cupom para resgate.");
+            throw new IllegalArgumentException("Informe o código promocional para resgate.");
         }
 
+        Instant now = Instant.now();
         String normalizedCode = rawCode.trim().toUpperCase(Locale.ROOT);
-        CouponEntity coupon = couponRepository.findByCodeIgnoreCase(normalizedCode)
-            .orElseThrow(() -> new ResourceNotFoundException("Cupom \"" + normalizedCode + "\" não encontrado."));
+        CouponEntity coupon = couponRepository.findByCodeForUpdate(normalizedCode)
+            .orElseThrow(() -> new IllegalArgumentException("Código promocional inválido, expirado ou esgotado."));
 
         SubscriptionPlanEntity plan = resolvePlanOrDefault(planId != null ? planId : coupon.getApplicablePlanId());
-        validateCouponEligibility(coupon, user.getId(), plan.getId());
+        validateCouponEligibility(coupon, user, plan.getId(), now);
 
         String type = coupon.getCouponType().toUpperCase(Locale.ROOT);
         boolean grantsFreeAccessNow = "FREE_PERIOD_DAYS".equals(type)
             || ("PERCENT_DISCOUNT".equals(type) && coupon.getDiscountPercent() != null && coupon.getDiscountPercent() >= 100);
 
-        Instant now = Instant.now();
         UserSubscriptionEntity sub = subscriptionRepository.findByUserId(user.getId())
             .orElseGet(UserSubscriptionEntity::new);
         sub.setUserId(user.getId());
@@ -295,29 +403,28 @@ public class SubscriptionBillingService {
             if (!"ACTIVE".equalsIgnoreCase(sub.getStatus()) && !"TRIALING".equalsIgnoreCase(sub.getStatus())) {
                 sub.setSource("COUPON_DISCOUNT_PENDING");
                 sub.setStatus("PENDING");
+                sub.setPriceCents(discountedCents);
+            } else {
+                int discCents = Math.max(0, plan.getPriceCents() - discountedCents);
+                sub.setNextBillingDiscountPercent("PERCENT_DISCOUNT".equalsIgnoreCase(coupon.getCouponType()) ? coupon.getDiscountPercent() : null);
+                sub.setNextBillingDiscountCents(discCents);
+                sub.setNextBillingCouponCode(coupon.getCode());
+                sub.setNextBillingPriceCents(discountedCents);
+                sub.setNextBillingDiscountNote("Cupom " + coupon.getCode() + " aplicado para a próxima cobrança");
             }
-            sub.setPriceCents(discountedCents);
             sub.setStatusReason("Cupom promocional " + coupon.getCode() + " vinculado ao plano " + plan.getName());
             sub = subscriptionRepository.save(sub);
 
             benefitSummary = buildCouponBenefitLabel(coupon);
-            responseMessage = "Cupom " + coupon.getCode() + " aplicado (" + benefitSummary + "). Valor ajustado para o plano " + plan.getName() + ".";
+            responseMessage = "Cupom " + coupon.getCode() + " aplicado (" + benefitSummary + "). Valor ajustado para a próxima cobrança do plano " + plan.getName() + ".";
         }
 
-        coupon.setCurrentRedemptions(coupon.getCurrentRedemptions() + 1);
-        couponRepository.save(coupon);
-
-        CouponRedemptionEntity redemption = new CouponRedemptionEntity();
-        redemption.setCouponId(coupon.getId());
-        redemption.setCouponCode(coupon.getCode());
-        redemption.setUserId(user.getId());
-        redemption.setUserEmail(user.getEmail());
-        redemption.setSubscriptionId(sub.getId());
-        redemption.setBenefitSummary(benefitSummary);
-        redemption.setRedeemedAtUtc(now);
-        redemptionRepository.save(redemption);
+        consumeCouponAtomically(coupon, user, sub.getId(), benefitSummary, now);
 
         eventPublisherService.publishBillingUpdated("COUPON_REDEEMED:" + coupon.getCode());
+        if (grantsFreeAccessNow) {
+            publishUserTierActivity(user, "COUPON_REDEEMED");
+        }
 
         List<DunningNoticeDto> notices = dunningNoticeRepository.findTop10ByUserIdOrderByCreatedAtUtcDesc(user.getId())
             .stream().map(DunningNoticeDto::fromEntity).toList();
@@ -336,7 +443,7 @@ public class SubscriptionBillingService {
     public UserSubscriptionStatusDto syncStoreKitTransaction(User user, SyncStoreKitRequest req) {
         ensureDefaultPlans();
         if (req == null || req.productId() == null || req.productId().isBlank()) {
-            throw new IllegalArgumentException("Identificador do produto StoreKit obrigatório.");
+            throw new IllegalArgumentException("Identificador do produto obrigatório.");
         }
 
         SubscriptionPlanEntity plan = planRepository.findByStorekitProductId(req.productId().trim())
@@ -352,24 +459,60 @@ public class SubscriptionBillingService {
         Instant endAt = parseInstantOrDefault(req.expiresDateUtc(), startAt.plus(defaultDuration));
         boolean isTrial = Boolean.TRUE.equals(req.isTrialPeriod());
 
-        int paidCents = req.paidAmountCents() != null
-            ? Math.max(0, req.paidAmountCents())
-            : (isTrial ? 0 : plan.getPriceCents());
-        int discountCents = Math.max(0, plan.getPriceCents() - paidCents);
+        String couponCodeFromReq = (req.couponCode() != null && !req.couponCode().isBlank())
+            ? req.couponCode().trim().toUpperCase(Locale.ROOT)
+            : null;
+        String ledgerRef = (req.transactionId() != null && !req.transactionId().isBlank())
+            ? "SK2-" + req.transactionId().trim()
+            : "SK2-" + UUID.randomUUID().toString().substring(0, 10);
+        boolean isNewStoreKitLedger = !paymentEntryRepository.existsByReferenceCode(ledgerRef);
+
+        CouponEntity lockedReqCoupon = null;
+        if (couponCodeFromReq != null && isNewStoreKitLedger) {
+            lockedReqCoupon = couponRepository.findByCodeForUpdate(couponCodeFromReq)
+                .orElseThrow(() -> new IllegalArgumentException("Código promocional inválido, expirado ou esgotado."));
+            if (redemptionRepository.countByCouponIdAndUserId(lockedReqCoupon.getId(), user.getId()) == 0) {
+                validateCouponEligibility(lockedReqCoupon, user, plan.getId(), now);
+            } else {
+                lockedReqCoupon = null;
+            }
+        }
 
         UserSubscriptionEntity sub = subscriptionRepository.findByUserId(user.getId())
             .orElseGet(UserSubscriptionEntity::new);
+
+        int paidCents;
+        int discountCents;
+        String entryCoupon = null;
+        if (req.paidAmountCents() != null) {
+            paidCents = Math.max(0, req.paidAmountCents());
+            discountCents = Math.max(0, plan.getPriceCents() - paidCents);
+        } else if (isTrial) {
+            paidCents = 0;
+            discountCents = plan.getPriceCents();
+        } else if (sub.getNextBillingPriceCents() != null) {
+            paidCents = Math.max(0, sub.getNextBillingPriceCents());
+            discountCents = Math.max(0, plan.getPriceCents() - paidCents);
+            entryCoupon = sub.getNextBillingCouponCode();
+            sub.clearNextBillingDiscount();
+        } else {
+            paidCents = plan.getPriceCents();
+            discountCents = 0;
+        }
+
         sub.setUserId(user.getId());
         sub.setUserEmail(user.getEmail());
         sub.setPlanId(plan.getId());
         sub.setPlanName(plan.getName());
         sub.setSource("APPLE_STOREKIT");
         sub.setStatus(isTrial ? "TRIALING" : "ACTIVE");
-        sub.setPriceCents(paidCents);
+        sub.setPriceCents(isTrial ? 0 : plan.getPriceCents());
         sub.setCurrency(plan.getCurrency());
         sub.setAutoRenew(true);
         if (req.couponCode() != null && !req.couponCode().isBlank()) {
             sub.setAppliedCouponCode(req.couponCode().trim().toUpperCase(Locale.ROOT));
+        } else if (entryCoupon != null) {
+            sub.setAppliedCouponCode(entryCoupon);
         }
         String txId = (req.originalTransactionId() != null && !req.originalTransactionId().isBlank())
             ? req.originalTransactionId().trim()
@@ -381,16 +524,21 @@ public class SubscriptionBillingService {
             sub.setTrialEndsAtUtc(endAt);
         }
         clearOverdueFields(sub);
-        String env = (req.environment() != null && !req.environment().isBlank()) ? req.environment().trim() : "Xcode";
-        sub.setStatusReason("Assinatura Apple StoreKit 2 sincronizada (" + env + ")");
+        sub.setStatusReason("Assinatura App Store ativa");
         sub.setUpdatedAtUtc(now);
         sub = subscriptionRepository.save(sub);
 
-        String ledgerRef = (req.transactionId() != null && !req.transactionId().isBlank())
-            ? "SK2-" + req.transactionId().trim()
-            : "SK2-" + UUID.randomUUID().toString().substring(0, 10);
+        if (lockedReqCoupon != null) {
+            consumeCouponAtomically(
+                lockedReqCoupon,
+                user,
+                sub.getId(),
+                "Aplicado em assinatura App Store: " + plan.getName(),
+                now
+            );
+        }
 
-        if (!paymentEntryRepository.existsByReferenceCode(ledgerRef)) {
+        if (isNewStoreKitLedger) {
             PaymentEntryEntity entry = new PaymentEntryEntity();
             entry.setUserId(user.getId());
             entry.setUserEmail(user.getEmail());
@@ -404,9 +552,9 @@ public class SubscriptionBillingService {
             entry.setPaymentMethod("APPLE_IAP");
             entry.setCouponCode(sub.getAppliedCouponCode());
             entry.setReferenceCode(ledgerRef);
-            entry.setDescription(plan.getName() + " • Apple StoreKit (" + env + ")");
+            entry.setDescription(plan.getName() + " • App Store");
             entry.setPaidAtUtc(startAt);
-            entry.setCreatedBy("StoreKit2");
+            entry.setCreatedBy("App Store");
             paymentEntryRepository.save(entry);
         }
 
@@ -422,6 +570,7 @@ public class SubscriptionBillingService {
             "Forma Pro ativo! Assinatura sincronizada com sucesso."
         );
         eventPublisherService.publishBillingUpdated("STOREKIT_SYNC:" + plan.getId());
+        publishUserTierActivity(user, "SUBSCRIPTION_SYNCED");
 
         List<DunningNoticeDto> notices = dunningNoticeRepository.findTop10ByUserIdOrderByCreatedAtUtcDesc(user.getId())
             .stream().map(DunningNoticeDto::fromEntity).toList();
@@ -448,13 +597,14 @@ public class SubscriptionBillingService {
             evaluated++;
             User user = userRepository.findById(sub.getUserId()).orElse(null);
 
-            if ("TRIALING".equalsIgnoreCase(sub.getStatus())
+            if (("TRIALING".equalsIgnoreCase(sub.getStatus())
+                || ("ACTIVE".equalsIgnoreCase(sub.getStatus()) && sub.getPriceCents() <= 0 && !sub.isAutoRenew()))
                 && sub.getCurrentPeriodEndUtc() != null
                 && now.isAfter(sub.getCurrentPeriodEndUtc())) {
 
                 if (!sub.isAutoRenew()) {
                     sub.setStatus("EXPIRED");
-                    sub.setStatusReason("Período grátis ou cupom encerrado em " + formatShortDate(sub.getCurrentPeriodEndUtc()));
+                    sub.setStatusReason("Período grátis ou cortesia encerrada em " + formatShortDate(sub.getCurrentPeriodEndUtc()));
                     sub.setUpdatedAtUtc(now);
                     subscriptionRepository.save(sub);
                     expiredTrials++;
@@ -470,6 +620,7 @@ public class SubscriptionBillingService {
                             null,
                             "Seu período grátis do Forma Pro terminou. Assine ou aplique outro cupom para continuar com a IA."
                         );
+                        publishUserTierActivity(user, "SUBSCRIPTION_EXPIRED");
                     }
                     continue;
                 } else {
@@ -533,6 +684,7 @@ public class SubscriptionBillingService {
                             sub.getGraceEndsAtUtc().toString(),
                             msg
                         );
+                        publishUserTierActivity(user, "SUBSCRIPTION_" + sub.getStatus());
                         notice.setWebsocketDelivered(true);
                         dunningNoticeRepository.save(notice);
                     }
@@ -661,29 +813,56 @@ public class SubscriptionBillingService {
         SubscriptionPlanEntity plan = resolvePlanOrDefault(planId);
         Instant now = Instant.now();
 
-        UserSubscriptionEntity sub = subscriptionRepository.findByUserId(user.getId())
-            .orElseGet(() -> {
-                UserSubscriptionEntity created = new UserSubscriptionEntity();
-                created.setUserId(user.getId());
-                created.setUserEmail(user.getEmail());
-                created.setPlanId(plan.getId());
-                created.setPlanName(plan.getName());
-                created.setSource("EXTERNAL_GATEWAY");
-                created.setStatus("ACTIVE");
-                created.setPriceCents(plan.getPriceCents());
-                return created;
-            });
+        Optional<UserSubscriptionEntity> existingSubOpt = subscriptionRepository.findByUserId(user.getId());
+        boolean hasExistingSub = existingSubOpt.isPresent();
+        UserSubscriptionEntity sub = existingSubOpt.orElseGet(() -> {
+            UserSubscriptionEntity created = new UserSubscriptionEntity();
+            created.setUserId(user.getId());
+            created.setUserEmail(user.getEmail());
+            created.setPlanId(plan.getId());
+            created.setPlanName(plan.getName());
+            created.setSource("EXTERNAL_GATEWAY");
+            created.setStatus("ACTIVE");
+            created.setPriceCents(plan.getPriceCents());
+            return created;
+        });
+
+        boolean matchesActiveExternalTx = externalTxId != null && !externalTxId.isBlank()
+            && externalTxId.equals(sub.getExternalTransactionId());
+        boolean activeCourtesyGrant = hasExistingSub
+            && isActiveCourtesyOrFreeGrant(sub, now)
+            && !matchesActiveExternalTx;
 
         String processingStatus = "PROCESSED";
         switch (eventType) {
             case "PAYMENT_SUCCEEDED", "SUBSCRIPTION_RENEWED", "DID_RENEW", "SUBSCRIBED" -> {
                 Duration period = "YEARLY".equalsIgnoreCase(plan.getBillingInterval())
                     ? Duration.ofDays(365) : Duration.ofDays(30);
-                int effectiveCents = amountCents != null ? Math.max(0, amountCents) : plan.getPriceCents();
+                boolean hasScheduledDiscount = sub.getNextBillingPriceCents() != null;
+                int grossCents;
+                int netCents;
+                int discCents;
+                String scheduledCoupon = null;
+                if (hasScheduledDiscount) {
+                    grossCents = plan.getPriceCents();
+                    netCents = amountCents != null ? Math.max(0, amountCents) : Math.max(0, sub.getNextBillingPriceCents());
+                    discCents = Math.max(0, grossCents - netCents);
+                    scheduledCoupon = sub.getNextBillingCouponCode();
+                    sub.clearNextBillingDiscount();
+                    sub.setPriceCents(plan.getPriceCents());
+                } else {
+                    int effectiveCents = amountCents != null ? Math.max(0, amountCents) : plan.getPriceCents();
+                    grossCents = effectiveCents;
+                    netCents = effectiveCents;
+                    discCents = 0;
+                    sub.setPriceCents(effectiveCents);
+                }
+
                 sub.setPlanId(plan.getId());
                 sub.setPlanName(plan.getName());
+                sub.setSource("EXTERNAL_GATEWAY");
                 sub.setStatus("ACTIVE");
-                sub.setPriceCents(effectiveCents);
+                sub.setAutoRenew(true);
                 sub.setCurrentPeriodStartUtc(now);
                 sub.setCurrentPeriodEndUtc(now.plus(period));
                 if (externalTxId != null) sub.setExternalTransactionId(externalTxId);
@@ -695,89 +874,170 @@ public class SubscriptionBillingService {
                 user.setAccountTier("PRO");
                 userRepository.save(user);
 
-                PaymentEntryEntity entry = new PaymentEntryEntity();
-                entry.setUserId(user.getId());
-                entry.setUserEmail(user.getEmail());
-                entry.setSubscriptionId(sub.getId());
-                entry.setEntryType("SUBSCRIPTION_CHARGE");
-                entry.setStatus("PAID");
-                entry.setGrossAmountCents(effectiveCents);
-                entry.setDiscountCents(0);
-                entry.setNetAmountCents(effectiveCents);
-                entry.setCurrency(plan.getCurrency());
-                entry.setPaymentMethod("WEBHOOK");
-                entry.setReferenceCode("WH-" + eventId);
-                entry.setDescription(plan.getName() + " • Webhook " + eventType);
-                entry.setPaidAtUtc(now);
-                entry.setCreatedBy(provider);
-                paymentEntryRepository.save(entry);
+                final int finalGrossCents = grossCents;
+                final int finalDiscCents = discCents;
+                final int finalNetCents = netCents;
+                final String finalScheduledCoupon = scheduledCoupon;
+                final UUID savedSubId = sub.getId();
+                final String finalEventId = eventId;
+                final String finalProvider = provider;
+                final String finalEventType = eventType;
+                paymentEntryRepository.findFirstBySubscriptionIdAndStatusOrderByCreatedAtUtcDesc(savedSubId, "OVERDUE")
+                    .ifPresentOrElse(overdueEntry -> {
+                        overdueEntry.setStatus("PAID");
+                        overdueEntry.setGrossAmountCents(finalGrossCents);
+                        overdueEntry.setDiscountCents(finalDiscCents);
+                        overdueEntry.setNetAmountCents(finalNetCents);
+                        if (finalScheduledCoupon != null) {
+                            overdueEntry.setCouponCode(finalScheduledCoupon);
+                        }
+                        overdueEntry.setPaidAtUtc(now);
+                        overdueEntry.setDescription(plan.getName() + " • Quitado via Webhook " + finalEventType);
+                        paymentEntryRepository.save(overdueEntry);
+                    }, () -> {
+                        PaymentEntryEntity entry = new PaymentEntryEntity();
+                        entry.setUserId(user.getId());
+                        entry.setUserEmail(user.getEmail());
+                        entry.setSubscriptionId(savedSubId);
+                        entry.setEntryType("SUBSCRIPTION_CHARGE");
+                        entry.setStatus("PAID");
+                        entry.setGrossAmountCents(finalGrossCents);
+                        entry.setDiscountCents(finalDiscCents);
+                        entry.setNetAmountCents(finalNetCents);
+                        entry.setCurrency(plan.getCurrency());
+                        entry.setPaymentMethod("WEBHOOK");
+                        entry.setCouponCode(finalScheduledCoupon);
+                        entry.setReferenceCode("WH-" + finalEventId);
+                        entry.setDescription(plan.getName() + " • Webhook " + finalEventType);
+                        entry.setPaidAtUtc(now);
+                        entry.setCreatedBy(finalProvider);
+                        paymentEntryRepository.save(entry);
+                    });
 
                 eventPublisherService.publishUserSubscriptionState(
                     user, "SUBSCRIPTION_ACTIVATED", "ACTIVE", null, null,
                     "Pagamento confirmado! Seu Forma Pro foi renovado."
                 );
+                publishUserTierActivity(user, "WEBHOOK_PAYMENT_SUCCEEDED");
             }
             case "PAYMENT_FAILED", "DID_FAIL_TO_RENEW", "BILLING_RETRY", "SUBSCRIPTION_OVERDUE" -> {
-                transitionIntoOverdue(sub, now, "Falha de cobrança reportada via webhook (" + provider + ")", now);
-                evaluateOverdueSubscriptions();
+                if (activeCourtesyGrant) {
+                    processingStatus = "IGNORED_COURTESY_ACTIVE";
+                } else {
+                    transitionIntoOverdue(sub, now, "Falha de cobrança reportada via webhook (" + provider + ")", now);
+                    evaluateOverdueSubscriptions();
+                }
             }
             case "SUBSCRIPTION_PAUSED" -> {
-                sub.setStatus("PAUSED");
-                sub.setPausedAtUtc(now);
-                sub.setStatusReason("Pausada via webhook (" + provider + ")");
-                sub.setUpdatedAtUtc(now);
-                subscriptionRepository.save(sub);
-                user.setAccountTier("FREE");
-                userRepository.save(user);
-                eventPublisherService.publishUserSubscriptionState(
-                    user, "SUBSCRIPTION_ENFORCED", "PAUSED", null, null,
-                    "Sua assinatura foi pausada pelo provedor de pagamento."
-                );
+                if (activeCourtesyGrant && !"ADMIN_SIMULATOR".equalsIgnoreCase(provider)) {
+                    processingStatus = "IGNORED_COURTESY_ACTIVE";
+                } else {
+                    sub.setStatus("PAUSED");
+                    sub.setPausedAtUtc(now);
+                    sub.setStatusReason("Pausada via webhook (" + provider + ")");
+                    sub.setUpdatedAtUtc(now);
+                    subscriptionRepository.save(sub);
+                    user.setAccountTier("FREE");
+                    userRepository.save(user);
+                    eventPublisherService.publishUserSubscriptionState(
+                        user, "SUBSCRIPTION_ENFORCED", "PAUSED", null, null,
+                        "Sua assinatura foi pausada pelo provedor de pagamento."
+                    );
+                    publishUserTierActivity(user, "WEBHOOK_PAUSED");
+                }
             }
             case "SUBSCRIPTION_CANCELED", "EXPIRED" -> {
-                sub.setStatus("CANCELED");
-                sub.setCanceledAtUtc(now);
-                sub.setStatusReason("Cancelada via webhook (" + provider + ")");
-                sub.setUpdatedAtUtc(now);
-                subscriptionRepository.save(sub);
-                user.setAccountTier("FREE");
-                userRepository.save(user);
-                eventPublisherService.publishUserSubscriptionState(
-                    user, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
-                    "Sua assinatura Forma Pro foi cancelada."
-                );
+                if (activeCourtesyGrant && !"ADMIN_SIMULATOR".equalsIgnoreCase(provider)) {
+                    processingStatus = "IGNORED_COURTESY_ACTIVE";
+                } else {
+                    sub.setStatus("CANCELED");
+                    sub.setAutoRenew(false);
+                    sub.setCanceledAtUtc(now);
+                    sub.setStatusReason("Cancelada via webhook (" + provider + ")");
+                    sub.setUpdatedAtUtc(now);
+                    subscriptionRepository.save(sub);
+                    user.setAccountTier("FREE");
+                    userRepository.save(user);
+                    eventPublisherService.publishUserSubscriptionState(
+                        user, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
+                        "Sua assinatura Forma Pro foi cancelada."
+                    );
+                    publishUserTierActivity(user, "WEBHOOK_CANCELED");
+                }
             }
             case "REFUNDED", "REFUND" -> {
-                int refundCents = amountCents != null ? Math.max(0, amountCents) : Math.max(0, sub.getPriceCents());
-                sub.setStatus("CANCELED");
-                sub.setCanceledAtUtc(now);
-                sub.setStatusReason("Estorno processado via webhook (" + provider + ")");
-                sub.setUpdatedAtUtc(now);
-                subscriptionRepository.save(sub);
-                user.setAccountTier("FREE");
-                userRepository.save(user);
+                if (activeCourtesyGrant) {
+                    if (amountCents != null && amountCents > 0) {
+                        PaymentEntryEntity refund = new PaymentEntryEntity();
+                        refund.setUserId(user.getId());
+                        refund.setUserEmail(user.getEmail());
+                        refund.setSubscriptionId(sub.getId());
+                        refund.setEntryType("REFUND");
+                        refund.setStatus("REFUNDED");
+                        refund.setGrossAmountCents(amountCents);
+                        refund.setDiscountCents(0);
+                        refund.setNetAmountCents(amountCents);
+                        refund.setCurrency(plan.getCurrency());
+                        refund.setPaymentMethod("WEBHOOK");
+                        refund.setReferenceCode("REF-" + eventId);
+                        refund.setDescription("Estorno de cobrança anterior via webhook (" + provider + ") • cortesia mantida");
+                        refund.setPaidAtUtc(now);
+                        refund.setCreatedBy(provider);
+                        paymentEntryRepository.save(refund);
 
-                PaymentEntryEntity refund = new PaymentEntryEntity();
-                refund.setUserId(user.getId());
-                refund.setUserEmail(user.getEmail());
-                refund.setSubscriptionId(sub.getId());
-                refund.setEntryType("REFUND");
-                refund.setStatus("REFUNDED");
-                refund.setGrossAmountCents(refundCents);
-                refund.setDiscountCents(0);
-                refund.setNetAmountCents(refundCents);
-                refund.setCurrency(plan.getCurrency());
-                refund.setPaymentMethod("WEBHOOK");
-                refund.setReferenceCode("REF-" + eventId);
-                refund.setDescription("Estorno via webhook (" + provider + ")");
-                refund.setPaidAtUtc(now);
-                refund.setCreatedBy(provider);
-                paymentEntryRepository.save(refund);
+                        String baseReason = sub.getStatusReason() != null ? sub.getStatusReason() : "Cortesia ativa";
+                        if (!baseReason.contains("cortesia ativa preservada")) {
+                            String updatedReason = baseReason + " • Estorno de cobrança anterior registrado; cortesia ativa preservada";
+                            sub.setStatusReason(updatedReason.length() > 255 ? updatedReason.substring(0, 255) : updatedReason);
+                        }
+                        sub.setUpdatedAtUtc(now);
+                        subscriptionRepository.save(sub);
+                        processingStatus = "PROCESSED_COURTESY_PRESERVED";
+                    } else {
+                        processingStatus = "IGNORED_COURTESY_NO_CHARGE";
+                    }
+                } else {
+                    int refundCents = amountCents != null
+                        ? Math.max(0, amountCents)
+                        : (hasExistingSub ? Math.max(0, sub.getPriceCents()) : 0);
+                    if (!hasExistingSub && refundCents <= 0) {
+                        processingStatus = "IGNORED_NO_PAID_SUBSCRIPTION";
+                    } else {
+                        sub.setStatus("CANCELED");
+                        sub.setAutoRenew(false);
+                        sub.setCanceledAtUtc(now);
+                        sub.setStatusReason("Estorno processado via webhook (" + provider + ")");
+                        sub.setUpdatedAtUtc(now);
+                        sub = subscriptionRepository.save(sub);
+                        user.setAccountTier("FREE");
+                        userRepository.save(user);
 
-                eventPublisherService.publishUserSubscriptionState(
-                    user, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
-                    "Reembolso confirmado. Conta retornada para a Camada Essencial."
-                );
+                        if (refundCents > 0) {
+                            PaymentEntryEntity refund = new PaymentEntryEntity();
+                            refund.setUserId(user.getId());
+                            refund.setUserEmail(user.getEmail());
+                            refund.setSubscriptionId(sub.getId());
+                            refund.setEntryType("REFUND");
+                            refund.setStatus("REFUNDED");
+                            refund.setGrossAmountCents(refundCents);
+                            refund.setDiscountCents(0);
+                            refund.setNetAmountCents(refundCents);
+                            refund.setCurrency(plan.getCurrency());
+                            refund.setPaymentMethod("WEBHOOK");
+                            refund.setReferenceCode("REF-" + eventId);
+                            refund.setDescription("Estorno via webhook (" + provider + ")");
+                            refund.setPaidAtUtc(now);
+                            refund.setCreatedBy(provider);
+                            paymentEntryRepository.save(refund);
+                        }
+
+                        eventPublisherService.publishUserSubscriptionState(
+                            user, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
+                            "Reembolso confirmado. Conta retornada para a Camada Essencial."
+                        );
+                        publishUserTierActivity(user, "WEBHOOK_REFUNDED");
+                    }
+                }
             }
             default -> processingStatus = "IGNORED_UNSUPPORTED_TYPE";
         }
@@ -794,16 +1054,48 @@ public class SubscriptionBillingService {
         Instant now = Instant.now();
         Instant thirtyDaysAgo = now.minus(Duration.ofDays(30));
 
-        List<SubscriptionPlanEntity> plans = planRepository.findAllByOrderByPriceCentsAsc();
-        List<UserSubscriptionEntity> subs = subscriptionRepository.findAllByOrderByUpdatedAtUtcDesc();
-        List<CouponEntity> coupons = couponRepository.findAllByOrderByCreatedAtUtcDesc();
-        List<CouponRedemptionEntity> redemptions = redemptionRepository.findTop100ByOrderByRedeemedAtUtcDesc();
-        List<PaymentEntryEntity> entries = paymentEntryRepository.findTop200ByOrderByCreatedAtUtcDesc();
-        List<DunningNoticeEntity> notices = dunningNoticeRepository.findTop100ByOrderByCreatedAtUtcDesc();
-        List<BillingWebhookEventEntity> webhooks = webhookEventRepository.findTop100ByOrderByReceivedAtUtcDesc();
+        List<SubscriptionPlanEntity> plans;
+        List<UserSubscriptionEntity> subs;
+        List<CouponEntity> coupons;
+        List<CouponRedemptionEntity> redemptions;
+        List<PaymentEntryEntity> entries;
+        List<DunningNoticeEntity> notices;
+        List<BillingWebhookEventEntity> webhooks;
+        List<User> allUsers;
 
-        Map<UUID, User> usersById = new HashMap<>();
-        userRepository.findAll().forEach(u -> usersById.put(u.getId(), u));
+        try (ExecutorService vExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Semaphore limiter = new Semaphore(8);
+            CompletableFuture<List<SubscriptionPlanEntity>> plansFut = supplyParallelOrInline(planRepository::findAllByOrderByPriceCentsAsc, vExecutor, limiter);
+            CompletableFuture<List<UserSubscriptionEntity>> subsFut = supplyParallelOrInline(subscriptionRepository::findAllByOrderByUpdatedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<CouponEntity>> couponsFut = supplyParallelOrInline(couponRepository::findAllByOrderByCreatedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<CouponRedemptionEntity>> redemptionsFut = supplyParallelOrInline(redemptionRepository::findTop100ByOrderByRedeemedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<PaymentEntryEntity>> entriesFut = supplyParallelOrInline(paymentEntryRepository::findTop200ByOrderByCreatedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<DunningNoticeEntity>> noticesFut = supplyParallelOrInline(dunningNoticeRepository::findTop100ByOrderByCreatedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<BillingWebhookEventEntity>> webhooksFut = supplyParallelOrInline(webhookEventRepository::findTop100ByOrderByReceivedAtUtcDesc, vExecutor, limiter);
+            CompletableFuture<List<User>> usersFut = supplyParallelOrInline(userRepository::findAll, vExecutor, limiter);
+
+            CompletableFuture.allOf(plansFut, subsFut, couponsFut, redemptionsFut, entriesFut, noticesFut, webhooksFut, usersFut).join();
+
+            plans = plansFut.join();
+            subs = subsFut.join();
+            coupons = couponsFut.join();
+            redemptions = redemptionsFut.join();
+            entries = entriesFut.join();
+            notices = noticesFut.join();
+            webhooks = webhooksFut.join();
+            allUsers = usersFut.join();
+        }
+
+        if (plans.isEmpty() && planRepository.count() == 0) {
+            defaultPlansEnsured.set(false);
+            ensureDefaultPlans();
+            plans = planRepository.findAllByOrderByPriceCentsAsc();
+        }
+
+        Map<UUID, User> usersById = new HashMap<>(Math.max(16, allUsers.size() * 2));
+        for (User u : allUsers) {
+            usersById.put(u.getId(), u);
+        }
 
         long mrrCents = 0;
         long activeCount = 0;
@@ -936,12 +1228,17 @@ public class SubscriptionBillingService {
 
     @Transactional
     public CouponSummaryDto createCoupon(CreateOrUpdateCouponRequest req, String adminActor) {
-        if (req == null || req.code() == null || req.code().isBlank()) {
-            throw new IllegalArgumentException("Código do cupom obrigatório.");
+        if (req == null) {
+            throw new IllegalArgumentException("Dados do cupom são obrigatórios.");
         }
-        String cleanCode = req.code().trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]", "");
-        if (cleanCode.length() < 3) {
-            throw new IllegalArgumentException("O código do cupom deve ter ao menos 3 caracteres alfanuméricos.");
+        String cleanCode;
+        if (req.code() == null || req.code().isBlank()) {
+            cleanCode = generateSecureCouponCode("PRIV");
+        } else {
+            cleanCode = req.code().trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]", "");
+            if (cleanCode.length() < 4) {
+                throw new IllegalArgumentException("O código do cupom deve ter ao menos 4 caracteres alfanuméricos.");
+            }
         }
         if (couponRepository.findByCodeIgnoreCase(cleanCode).isPresent()) {
             throw new IllegalStateException("Já existe um cupom com o código " + cleanCode + ".");
@@ -949,7 +1246,7 @@ public class SubscriptionBillingService {
 
         CouponEntity c = new CouponEntity();
         c.setCode(cleanCode);
-        applyCouponFields(c, req);
+        applyCouponFields(c, req, true);
         c.setCreatedByAdmin(adminActor);
         c.setCreatedAtUtc(Instant.now());
         CouponEntity saved = couponRepository.save(c);
@@ -959,9 +1256,12 @@ public class SubscriptionBillingService {
 
     @Transactional
     public CouponSummaryDto updateCoupon(UUID couponId, CreateOrUpdateCouponRequest req) {
+        if (req == null) {
+            throw new IllegalArgumentException("Dados de atualização do cupom são obrigatórios.");
+        }
         CouponEntity c = couponRepository.findById(couponId)
             .orElseThrow(() -> new ResourceNotFoundException("Cupom não encontrado."));
-        applyCouponFields(c, req);
+        applyCouponFields(c, req, false);
         CouponEntity saved = couponRepository.save(c);
         eventPublisherService.publishBillingUpdated("COUPON_UPDATED:" + saved.getCode());
         return CouponSummaryDto.fromEntity(saved);
@@ -971,6 +1271,16 @@ public class SubscriptionBillingService {
     public CouponSummaryDto toggleCoupon(UUID couponId) {
         CouponEntity c = couponRepository.findById(couponId)
             .orElseThrow(() -> new ResourceNotFoundException("Cupom não encontrado."));
+        if (!c.isActive()) {
+            if (c.isExhausted()) {
+                throw new IllegalArgumentException(
+                    "Cupom esgotado (" + c.getCurrentRedemptions() + "/" + c.getMaxRedemptions() + "). Amplie o limite de usos antes de reativar."
+                );
+            }
+            if (c.isExpired(Instant.now())) {
+                throw new IllegalArgumentException("Cupom expirado. Atualize a data de validade antes de reativar.");
+            }
+        }
         c.setActive(!c.isActive());
         CouponEntity saved = couponRepository.save(c);
         eventPublisherService.publishBillingUpdated("COUPON_TOGGLED:" + saved.getCode());
@@ -995,12 +1305,30 @@ public class SubscriptionBillingService {
         int days = (req.periodDays() != null && req.periodDays() > 0)
             ? req.periodDays()
             : ("YEARLY".equalsIgnoreCase(plan.getBillingInterval()) ? 365 : 30);
-        boolean isTrial = Boolean.TRUE.equals(req.isTrial());
+        String normalizedMethod = (req.paymentMethod() != null && !req.paymentMethod().isBlank())
+            ? req.paymentMethod().trim().toUpperCase(Locale.ROOT)
+            : "MANUAL";
+        boolean isCourtesyMethod = "COURTESY".equals(normalizedMethod);
+        boolean isTrial = Boolean.TRUE.equals(req.isTrial()) || (isCourtesyMethod && req.customPriceCents() == null);
         int price = req.customPriceCents() != null
             ? Math.max(0, req.customPriceCents())
-            : (isTrial ? 0 : plan.getPriceCents());
+            : (isTrial || isCourtesyMethod ? 0 : plan.getPriceCents());
+        boolean effectiveAutoRenew = req.autoRenew() != null
+            ? (req.autoRenew() && !isTrial && !isCourtesyMethod)
+            : (!isTrial && !isCourtesyMethod);
         Instant now = Instant.now();
         Instant end = now.plus(Duration.ofDays(days));
+
+        String grantCouponCode = (req.couponCode() != null && !req.couponCode().isBlank())
+            ? req.couponCode().trim().toUpperCase(Locale.ROOT)
+            : null;
+        CouponEntity lockedGrantCoupon = null;
+        if (grantCouponCode != null) {
+            lockedGrantCoupon = couponRepository.findByCodeForUpdate(grantCouponCode)
+                .orElseThrow(() -> new IllegalArgumentException("Código promocional inválido, expirado ou esgotado."));
+            validateCouponEligibility(lockedGrantCoupon, user, plan.getId(), now);
+            grantCouponCode = lockedGrantCoupon.getCode();
+        }
 
         UserSubscriptionEntity sub = subscriptionRepository.findByUserId(user.getId())
             .orElseGet(UserSubscriptionEntity::new);
@@ -1012,8 +1340,8 @@ public class SubscriptionBillingService {
         sub.setStatus(isTrial ? "TRIALING" : "ACTIVE");
         sub.setPriceCents(price);
         sub.setCurrency(plan.getCurrency());
-        sub.setAppliedCouponCode(req.couponCode() != null && !req.couponCode().isBlank() ? req.couponCode().trim().toUpperCase(Locale.ROOT) : null);
-        sub.setAutoRenew(req.autoRenew() != null ? req.autoRenew() : !isTrial);
+        sub.setAppliedCouponCode(grantCouponCode);
+        sub.setAutoRenew(effectiveAutoRenew);
         if (req.overdueActionOverride() != null && !req.overdueActionOverride().isBlank()) {
             sub.setOverdueActionOverride(req.overdueActionOverride().trim().toUpperCase(Locale.ROOT));
         }
@@ -1023,9 +1351,19 @@ public class SubscriptionBillingService {
         clearOverdueFields(sub);
         sub.setStatusReason((req.note() != null && !req.note().isBlank())
             ? req.note().trim()
-            : (isTrial ? "Período grátis liberado manualmente (" + days + " dias)" : "Assinatura liberada pelo administrador"));
+            : (isTrial ? "Cortesia liberada (" + days + " dias grátis)" : "Assinatura liberada pelo administrador"));
         sub.setUpdatedAtUtc(now);
         sub = subscriptionRepository.save(sub);
+
+        if (lockedGrantCoupon != null) {
+            consumeCouponAtomically(
+                lockedGrantCoupon,
+                user,
+                sub.getId(),
+                "Aplicado pelo admin (" + adminActor + "): " + buildCouponBenefitLabel(lockedGrantCoupon),
+                now
+            );
+        }
 
         user.setAccountTier("PRO");
         userRepository.save(user);
@@ -1040,7 +1378,7 @@ public class SubscriptionBillingService {
         entry.setDiscountCents(0);
         entry.setNetAmountCents(price);
         entry.setCurrency(plan.getCurrency());
-        entry.setPaymentMethod((req.paymentMethod() != null && !req.paymentMethod().isBlank()) ? req.paymentMethod().trim().toUpperCase(Locale.ROOT) : "MANUAL");
+        entry.setPaymentMethod(normalizedMethod);
         entry.setCouponCode(sub.getAppliedCouponCode());
         entry.setReferenceCode("ADM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         entry.setDescription(plan.getName() + " • " + sub.getStatusReason());
@@ -1053,6 +1391,7 @@ public class SubscriptionBillingService {
             "Forma Pro liberado (" + (isTrial ? days + " dias grátis" : plan.getName()) + ")!"
         );
         eventPublisherService.publishBillingUpdated("ADMIN_GRANT");
+        publishUserTierActivity(user, "ADMIN_GRANT");
 
         return toSubscriptionDto(sub, user.getAccountTier(), List.of());
     }
@@ -1066,20 +1405,92 @@ public class SubscriptionBillingService {
         String action = (req != null && req.action() != null) ? req.action().trim().toUpperCase(Locale.ROOT) : "";
 
         switch (action) {
-            case "ACTIVATE_RENEW" -> {
+            case "ACTIVATE_RENEW", "REACTIVATE" -> {
                 int days = (req.extendDays() != null && req.extendDays() > 0) ? req.extendDays() : 30;
+                SubscriptionPlanEntity plan = resolvePlanOrDefault(sub.getPlanId());
+                int basePrice = plan.getPriceCents() > 0 ? plan.getPriceCents() : sub.getPriceCents();
+                if (sub.getNextBillingPriceCents() != null) {
+                    int netCents = Math.max(0, sub.getNextBillingPriceCents());
+                    int discCents = Math.max(0, basePrice - netCents);
+                    String schedCoupon = sub.getNextBillingCouponCode();
+                    PaymentEntryEntity overdueEntry = paymentEntryRepository
+                        .findFirstBySubscriptionIdAndStatusOrderByCreatedAtUtcDesc(sub.getId(), "OVERDUE")
+                        .orElse(null);
+                    if (overdueEntry != null) {
+                        overdueEntry.setStatus("PAID");
+                        overdueEntry.setGrossAmountCents(basePrice);
+                        overdueEntry.setDiscountCents(discCents);
+                        overdueEntry.setNetAmountCents(netCents);
+                        overdueEntry.setCouponCode(schedCoupon);
+                        overdueEntry.setPaidAtUtc(now);
+                        overdueEntry.setDescription(plan.getName() + " • Renovado pelo admin com desconto");
+                        paymentEntryRepository.save(overdueEntry);
+                    } else {
+                        PaymentEntryEntity paidEntry = new PaymentEntryEntity();
+                        paidEntry.setUserId(sub.getUserId());
+                        paidEntry.setUserEmail(sub.getUserEmail());
+                        paidEntry.setSubscriptionId(sub.getId());
+                        paidEntry.setEntryType("SUBSCRIPTION_CHARGE");
+                        paidEntry.setStatus("PAID");
+                        paidEntry.setGrossAmountCents(basePrice);
+                        paidEntry.setDiscountCents(discCents);
+                        paidEntry.setNetAmountCents(netCents);
+                        paidEntry.setCurrency(sub.getCurrency());
+                        paidEntry.setPaymentMethod("MANUAL");
+                        paidEntry.setCouponCode(schedCoupon);
+                        paidEntry.setReferenceCode("RNW-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+                        paidEntry.setDescription(plan.getName() + " • Renovação administrativa com desconto");
+                        paidEntry.setPaidAtUtc(now);
+                        paidEntry.setCreatedBy(adminActor);
+                        paymentEntryRepository.save(paidEntry);
+                    }
+                    sub.setPriceCents(plan.getPriceCents());
+                    sub.clearNextBillingDiscount();
+                }
                 sub.setStatus("ACTIVE");
                 sub.setCurrentPeriodStartUtc(now);
                 sub.setCurrentPeriodEndUtc(now.plus(Duration.ofDays(days)));
                 clearOverdueFields(sub);
-                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Regularizada manualmente pelo administrador");
+                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Reativada e regularizada manualmente pelo administrador");
                 if (user != null) {
                     user.setAccountTier("PRO");
                     userRepository.save(user);
                     eventPublisherService.publishUserSubscriptionState(
                         user, "SUBSCRIPTION_ACTIVATED", "ACTIVE", null, null,
-                        "Pagamento regularizado! Seu Forma Pro foi reativado."
+                        "Sua assinatura Forma Pro foi reativada."
                     );
+                    publishUserTierActivity(user, "SUBSCRIPTION_REACTIVATED");
+                }
+            }
+            case "CLEAR_NEXT_DISCOUNT" -> {
+                return clearNextBillingDiscount(subscriptionId, adminActor);
+            }
+            case "EXTEND_30D" -> {
+                int days = (req.extendDays() != null && req.extendDays() > 0) ? req.extendDays() : 30;
+                Instant baseEnd = (sub.getCurrentPeriodEndUtc() != null && sub.getCurrentPeriodEndUtc().isAfter(now))
+                    ? sub.getCurrentPeriodEndUtc()
+                    : now;
+                Instant nextEnd = baseEnd.plus(Duration.ofDays(days));
+                if (!"TRIALING".equalsIgnoreCase(sub.getStatus())) {
+                    sub.setStatus("ACTIVE");
+                }
+                if (sub.getCurrentPeriodStartUtc() == null) {
+                    sub.setCurrentPeriodStartUtc(now);
+                }
+                sub.setCurrentPeriodEndUtc(nextEnd);
+                if ("TRIALING".equalsIgnoreCase(sub.getStatus())) {
+                    sub.setTrialEndsAtUtc(nextEnd);
+                }
+                clearOverdueFields(sub);
+                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Prazo estendido em +" + days + " dias pelo administrador");
+                if (user != null) {
+                    user.setAccountTier("PRO");
+                    userRepository.save(user);
+                    eventPublisherService.publishUserSubscriptionState(
+                        user, "SUBSCRIPTION_ACTIVATED", sub.getStatus(), null, null,
+                        "Sua assinatura Forma Pro foi estendida por +" + days + " dias."
+                    );
+                    publishUserTierActivity(user, "SUBSCRIPTION_EXTENDED");
                 }
             }
             case "MARK_OVERDUE" -> {
@@ -1091,27 +1502,30 @@ public class SubscriptionBillingService {
             case "PAUSE" -> {
                 sub.setStatus("PAUSED");
                 sub.setPausedAtUtc(now);
-                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Assinatura pausada pelo administrador");
+                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Assinatura pausada");
                 if (user != null) {
                     user.setAccountTier("FREE");
                     userRepository.save(user);
                     eventPublisherService.publishUserSubscriptionState(
                         user, "SUBSCRIPTION_ENFORCED", "PAUSED", null, null,
-                        "Sua assinatura Forma Pro foi pausada no painel administrativo."
+                        "Sua assinatura Forma Pro foi pausada."
                     );
+                    publishUserTierActivity(user, "SUBSCRIPTION_PAUSED");
                 }
             }
             case "CANCEL" -> {
                 sub.setStatus("CANCELED");
+                sub.setAutoRenew(false);
                 sub.setCanceledAtUtc(now);
-                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Assinatura cancelada pelo administrador");
+                sub.setStatusReason((req.reason() != null && !req.reason().isBlank()) ? req.reason().trim() : "Assinatura cancelada");
                 if (user != null) {
                     user.setAccountTier("FREE");
                     userRepository.save(user);
                     eventPublisherService.publishUserSubscriptionState(
                         user, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
-                        "Sua assinatura Forma Pro foi cancelada no painel administrativo."
+                        "Sua assinatura Forma Pro foi cancelada."
                     );
+                    publishUserTierActivity(user, "SUBSCRIPTION_CANCELED");
                 }
             }
             case "SET_POLICY" -> {
@@ -1128,6 +1542,182 @@ public class SubscriptionBillingService {
         eventPublisherService.publishBillingUpdated("ADMIN_SUB_ACTION:" + action);
         String tier = user != null ? user.getAccountTier() : "FREE";
         return toSubscriptionDto(sub, tier, List.of());
+    }
+
+    @Transactional
+    public UserSubscriptionStatusDto applyNextBillingDiscount(ApplyNextBillingDiscountRequest req, String adminActor) {
+        ensureDefaultPlans();
+        if (req == null) {
+            throw new IllegalArgumentException("Informe o usuário e os parâmetros do desconto.");
+        }
+
+        Instant now = Instant.now();
+        UserSubscriptionEntity sub;
+        User user;
+        if (req.subscriptionId() != null) {
+            sub = subscriptionRepository.findById(req.subscriptionId())
+                .orElseThrow(() -> new ResourceNotFoundException("Inscrição não encontrada."));
+            user = userRepository.findById(sub.getUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("Usuário da inscrição não encontrado."));
+        } else {
+            user = resolveTargetUser(req.userId(), req.userEmail());
+            SubscriptionPlanEntity fallbackPlan = resolvePlanOrDefault(req.planId());
+            sub = subscriptionRepository.findByUserId(user.getId()).orElseGet(() -> {
+                UserSubscriptionEntity created = new UserSubscriptionEntity();
+                created.setUserId(user.getId());
+                created.setUserEmail(user.getEmail());
+                created.setPlanId(fallbackPlan.getId());
+                created.setPlanName(fallbackPlan.getName());
+                created.setSource("ADMIN_MANUAL");
+                created.setStatus(user.isPro() ? "ACTIVE" : "FREE");
+                created.setPriceCents(fallbackPlan.getPriceCents());
+                created.setCurrency(fallbackPlan.getCurrency());
+                created.setAutoRenew(user.isPro());
+                created.setStatusReason("Assinatura configurada pelo administrador");
+                return created;
+            });
+        }
+
+        if (req.planId() != null && !req.planId().isBlank() && !user.isPro()) {
+            Optional<SubscriptionPlanEntity> explicitPlan = planRepository.findById(req.planId().trim());
+            if (explicitPlan.isPresent()) {
+                sub.setPlanId(explicitPlan.get().getId());
+                sub.setPlanName(explicitPlan.get().getName());
+                sub.setPriceCents(explicitPlan.get().getPriceCents());
+                sub.setCurrency(explicitPlan.get().getCurrency());
+            }
+        }
+
+        SubscriptionPlanEntity currentPlan = resolvePlanOrDefault(sub.getPlanId());
+        int basePriceCents = currentPlan.getPriceCents() > 0
+            ? currentPlan.getPriceCents()
+            : (sub.getPriceCents() > 0 ? sub.getPriceCents() : 2990);
+
+        Integer pct = null;
+        int discCents;
+        int discountedPrice;
+        String cleanCode = null;
+        String noteText = (req.note() != null && !req.note().isBlank()) ? req.note().trim() : null;
+
+        if ((req.couponCode() != null && !req.couponCode().isBlank()) || "COUPON".equalsIgnoreCase(req.discountType())) {
+            String rawCode = req.couponCode() != null ? req.couponCode().trim().toUpperCase(Locale.ROOT) : "";
+            if (rawCode.isBlank()) {
+                throw new IllegalArgumentException("Informe o código do cupom para aplicar na próxima cobrança.");
+            }
+            CouponEntity coupon = couponRepository.findByCodeForUpdate(rawCode)
+                .orElseThrow(() -> new IllegalArgumentException("Código promocional inválido, expirado ou esgotado."));
+            validateCouponEligibility(coupon, user, currentPlan.getId(), now);
+
+            discountedPrice = calculateFinalPriceCents(basePriceCents, coupon);
+            discCents = Math.max(0, basePriceCents - discountedPrice);
+            pct = "PERCENT_DISCOUNT".equalsIgnoreCase(coupon.getCouponType())
+                ? coupon.getDiscountPercent()
+                : ("FREE_PERIOD_DAYS".equalsIgnoreCase(coupon.getCouponType()) ? 100 : null);
+            cleanCode = coupon.getCode();
+            if (sub.getId() == null) {
+                sub = subscriptionRepository.save(sub);
+            }
+            consumeCouponAtomically(
+                coupon,
+                user,
+                sub.getId(),
+                "Aplicado pelo admin na próxima cobrança: " + buildCouponBenefitLabel(coupon),
+                now
+            );
+            if (noteText == null) {
+                noteText = "Cupom " + cleanCode + " aplicado na próxima cobrança por " + adminActor;
+            }
+        } else if ("FIXED_CENTS".equalsIgnoreCase(req.discountType())) {
+            discCents = Math.min(basePriceCents, clampInt(req.discountCents(), 1, 1000000, 500));
+            discountedPrice = Math.max(0, basePriceCents - discCents);
+        } else {
+            pct = clampInt(req.discountPercent(), 1, 100, 10);
+            discountedPrice = (int) Math.round(basePriceCents * ((100.0 - pct) / 100.0));
+            discCents = Math.max(0, basePriceCents - discountedPrice);
+        }
+
+        sub.setNextBillingDiscountPercent(pct);
+        sub.setNextBillingDiscountCents(discCents);
+        sub.setNextBillingCouponCode(cleanCode);
+        sub.setNextBillingPriceCents(discountedPrice);
+        sub.setNextBillingDiscountNote(noteText != null ? noteText : "Desconto agendado pelo administrador (" + adminActor + ")");
+        sub.setUpdatedAtUtc(now);
+        sub = subscriptionRepository.save(sub);
+
+        if ("PAST_DUE".equalsIgnoreCase(sub.getStatus())) {
+            final Integer nextPct = pct;
+            final int nextDisc = discCents;
+            final int nextNet = discountedPrice;
+            final String nextCoupon = cleanCode;
+            final String savedPlanName = sub.getPlanName();
+            paymentEntryRepository.findFirstBySubscriptionIdAndStatusOrderByCreatedAtUtcDesc(sub.getId(), "OVERDUE")
+                .ifPresent(overdueEntry -> {
+                    overdueEntry.setGrossAmountCents(basePriceCents);
+                    overdueEntry.setDiscountCents(nextDisc);
+                    overdueEntry.setNetAmountCents(nextNet);
+                    overdueEntry.setCouponCode(nextCoupon);
+                    overdueEntry.setDescription("Cobrança em atraso (" + savedPlanName + (nextPct != null ? " • -" + nextPct + "%" : " • com desconto") + ")");
+                    paymentEntryRepository.save(overdueEntry);
+                });
+        }
+
+        String formattedNext = String.format(Locale.forLanguageTag("pt-BR"), "R$ %.2f", discountedPrice / 100.0);
+        eventPublisherService.publishUserSubscriptionState(
+            user,
+            "SUBSCRIPTION_DISCOUNT_UPDATED",
+            sub.getStatus(),
+            null,
+            sub.getGraceEndsAtUtc() != null ? sub.getGraceEndsAtUtc().toString() : null,
+            "Desconto especial aplicado! Sua próxima cobrança será de " + formattedNext + "."
+        );
+        eventPublisherService.publishBillingUpdated("NEXT_BILLING_DISCOUNT_APPLIED:" + user.getEmail());
+
+        List<DunningNoticeDto> notices = dunningNoticeRepository.findTop10ByUserIdOrderByCreatedAtUtcDesc(user.getId())
+            .stream().map(DunningNoticeDto::fromEntity).toList();
+        return toSubscriptionDto(sub, user.getAccountTier(), notices);
+    }
+
+    @Transactional
+    public UserSubscriptionStatusDto clearNextBillingDiscount(UUID subscriptionId, String adminActor) {
+        UserSubscriptionEntity sub = subscriptionRepository.findById(subscriptionId)
+            .orElseThrow(() -> new ResourceNotFoundException("Inscrição não encontrada."));
+        User user = userRepository.findById(sub.getUserId()).orElse(null);
+
+        sub.clearNextBillingDiscount();
+        sub.setUpdatedAtUtc(Instant.now());
+        sub = subscriptionRepository.save(sub);
+
+        if ("PAST_DUE".equalsIgnoreCase(sub.getStatus())) {
+            int basePrice = resolvePlanOrDefault(sub.getPlanId()).getPriceCents();
+            int restoreAmount = sub.getPriceCents() > 0 ? sub.getPriceCents() : basePrice;
+            final String savedPlanName = sub.getPlanName();
+            paymentEntryRepository.findFirstBySubscriptionIdAndStatusOrderByCreatedAtUtcDesc(sub.getId(), "OVERDUE")
+                .ifPresent(overdueEntry -> {
+                    overdueEntry.setGrossAmountCents(restoreAmount);
+                    overdueEntry.setDiscountCents(0);
+                    overdueEntry.setNetAmountCents(restoreAmount);
+                    overdueEntry.setCouponCode(null);
+                    overdueEntry.setDescription("Cobrança em atraso (" + savedPlanName + ")");
+                    paymentEntryRepository.save(overdueEntry);
+                });
+        }
+
+        if (user != null) {
+            eventPublisherService.publishUserSubscriptionState(
+                user,
+                "SUBSCRIPTION_DISCOUNT_UPDATED",
+                sub.getStatus(),
+                null,
+                sub.getGraceEndsAtUtc() != null ? sub.getGraceEndsAtUtc().toString() : null,
+                "Desconto agendado para a próxima cobrança removido pela administração."
+            );
+        }
+        eventPublisherService.publishBillingUpdated("NEXT_BILLING_DISCOUNT_CLEARED:" + subscriptionId);
+
+        List<DunningNoticeDto> notices = user != null
+            ? dunningNoticeRepository.findTop10ByUserIdOrderByCreatedAtUtcDesc(user.getId()).stream().map(DunningNoticeDto::fromEntity).toList()
+            : List.of();
+        return toSubscriptionDto(sub, user != null ? user.getAccountTier() : "FREE", notices);
     }
 
     @Transactional
@@ -1156,7 +1746,7 @@ public class SubscriptionBillingService {
         if (stage <= 3) {
             sub.setLastWarningDaySent(Math.max(0, stage - 1));
         }
-        sub.setStatusReason("Simulação de inadimplência (Estágio Dia " + stage + " • " + hoursBack + "h em atraso)");
+        sub.setStatusReason("Aguardando regularização do pagamento (Dia " + stage + ")");
         sub.setUpdatedAtUtc(now);
         subscriptionRepository.save(sub);
 
@@ -1222,14 +1812,93 @@ public class SubscriptionBillingService {
         String nextStatus = (req != null && req.status() != null && !req.status().isBlank())
             ? req.status().trim().toUpperCase(Locale.ROOT)
             : "PAID";
+        if (!Set.of("PAID", "PENDING", "OVERDUE", "REFUNDED", "CANCELED").contains(nextStatus)) {
+            throw new IllegalArgumentException("Status financeiro inválido: " + nextStatus);
+        }
+
+        if ("REFUNDED".equals(nextStatus) && isCourtesyOrZeroValueEntry(entry)) {
+            throw new IllegalArgumentException(
+                "Cortesias e períodos gratuitos (R$ 0,00) não possuem cobrança financeira para estorno. "
+                + "Para revogar o acesso, pause ou cancele a assinatura do usuário."
+            );
+        }
+
+        Instant now = Instant.now();
         entry.setStatus(nextStatus);
         if ("PAID".equals(nextStatus) && entry.getPaidAtUtc() == null) {
-            entry.setPaidAtUtc(Instant.now());
+            entry.setPaidAtUtc(now);
         }
         if (req != null && req.reason() != null && !req.reason().isBlank()) {
             entry.setDescription(entry.getDescription() + " [" + req.reason().trim() + "]");
         }
         PaymentEntryEntity saved = paymentEntryRepository.save(entry);
+
+        boolean linkedToSubscription = entry.getSubscriptionId() != null
+            || "SUBSCRIPTION_CHARGE".equalsIgnoreCase(entry.getEntryType());
+
+        if ("REFUNDED".equals(nextStatus) && linkedToSubscription && entry.getUserId() != null) {
+            Optional<UserSubscriptionEntity> subOpt = entry.getSubscriptionId() != null
+                ? subscriptionRepository.findById(entry.getSubscriptionId()).or(() -> subscriptionRepository.findByUserId(entry.getUserId()))
+                : subscriptionRepository.findByUserId(entry.getUserId());
+            if (subOpt.isPresent()) {
+                UserSubscriptionEntity sub = subOpt.get();
+                if (isActiveCourtesyOrFreeGrant(sub, now)) {
+                    String currentReason = sub.getStatusReason() != null ? sub.getStatusReason() : "Cortesia ativa";
+                    if (!currentReason.contains("cortesia vigente mantida")) {
+                        String note = currentReason + " (Estorno de cobrança anterior registrado; cortesia vigente mantida)";
+                        sub.setStatusReason(note.length() > 255 ? note.substring(0, 255) : note);
+                    }
+                    sub.setUpdatedAtUtc(now);
+                    subscriptionRepository.save(sub);
+                } else if (!"CANCELED".equalsIgnoreCase(sub.getStatus())) {
+                    sub.setStatus("CANCELED");
+                    sub.setAutoRenew(false);
+                    sub.setCanceledAtUtc(now);
+                    sub.setStatusReason("Pagamento estornado no painel administrativo");
+                    sub.setUpdatedAtUtc(now);
+                    subscriptionRepository.save(sub);
+
+                    userRepository.findById(entry.getUserId()).ifPresent(u -> {
+                        u.setAccountTier("FREE");
+                        userRepository.save(u);
+                        eventPublisherService.publishUserSubscriptionState(
+                            u, "SUBSCRIPTION_ENFORCED", "CANCELED", null, null,
+                            "Seu pagamento foi estornado e a conta retornou ao plano Essencial."
+                        );
+                        publishUserTierActivity(u, "PAYMENT_REFUNDED");
+                    });
+                }
+            }
+        } else if ("PAID".equals(nextStatus) && linkedToSubscription && entry.getUserId() != null) {
+            Optional<UserSubscriptionEntity> subOpt = entry.getSubscriptionId() != null
+                ? subscriptionRepository.findById(entry.getSubscriptionId()).or(() -> subscriptionRepository.findByUserId(entry.getUserId()))
+                : subscriptionRepository.findByUserId(entry.getUserId());
+            if (subOpt.isPresent()) {
+                UserSubscriptionEntity sub = subOpt.get();
+                String st = sub.getStatus().toUpperCase(Locale.ROOT);
+                if ("PAST_DUE".equals(st) || "PAUSED".equals(st)) {
+                    sub.setStatus("ACTIVE");
+                    clearOverdueFields(sub);
+                    if (sub.getCurrentPeriodEndUtc() == null || sub.getCurrentPeriodEndUtc().isBefore(now)) {
+                        sub.setCurrentPeriodEndUtc(now.plus(Duration.ofDays(30)));
+                    }
+                    sub.setStatusReason("Cobrança quitada e assinatura reativada");
+                    sub.setUpdatedAtUtc(now);
+                    subscriptionRepository.save(sub);
+
+                    userRepository.findById(entry.getUserId()).ifPresent(u -> {
+                        u.setAccountTier("PRO");
+                        userRepository.save(u);
+                        eventPublisherService.publishUserSubscriptionState(
+                            u, "SUBSCRIPTION_ACTIVATED", "ACTIVE", null, null,
+                            "Pagamento confirmado! Seu Forma Pro está ativo novamente."
+                        );
+                        publishUserTierActivity(u, "PAYMENT_SETTLED");
+                    });
+                }
+            }
+        }
+
         eventPublisherService.publishBillingUpdated("ENTRY_STATUS_UPDATED:" + nextStatus);
         return PaymentEntryDto.fromEntity(saved);
     }
@@ -1262,10 +1931,14 @@ public class SubscriptionBillingService {
             overdueEntry.setSubscriptionId(sub.getId());
             overdueEntry.setEntryType("SUBSCRIPTION_CHARGE");
             overdueEntry.setStatus("OVERDUE");
-            int amount = sub.getPriceCents() > 0 ? sub.getPriceCents() : 2490;
-            overdueEntry.setGrossAmountCents(amount);
-            overdueEntry.setDiscountCents(0);
-            overdueEntry.setNetAmountCents(amount);
+            int fallbackPlanCents = resolvePlanOrDefault(sub.getPlanId()).getPriceCents();
+            int baseAmount = sub.getPriceCents() > 0 ? sub.getPriceCents() : fallbackPlanCents;
+            int netAmount = sub.getNextBillingPriceCents() != null ? Math.max(0, sub.getNextBillingPriceCents()) : baseAmount;
+            int discAmount = Math.max(0, baseAmount - netAmount);
+            overdueEntry.setGrossAmountCents(baseAmount);
+            overdueEntry.setDiscountCents(discAmount);
+            overdueEntry.setNetAmountCents(netAmount);
+            overdueEntry.setCouponCode(sub.getNextBillingCouponCode());
             overdueEntry.setCurrency(sub.getCurrency());
             overdueEntry.setPaymentMethod("APPLE_IAP");
             overdueEntry.setReferenceCode("OVD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
@@ -1373,27 +2046,95 @@ public class SubscriptionBillingService {
         return instant.atZone(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("dd/MM HH:mm")) + " UTC";
     }
 
-    private void validateCouponEligibility(CouponEntity coupon, UUID userId, String planId) {
-        if (!coupon.isActive()) {
-            throw new IllegalArgumentException("Este cupom está desativado no momento.");
+    private String generateSecureCouponCode(String prefix) {
+        String cleanPrefix = (prefix != null && !prefix.isBlank())
+            ? prefix.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "")
+            : "PRIV";
+        if (cleanPrefix.length() > 6) {
+            cleanPrefix = cleanPrefix.substring(0, 6);
         }
-        if (coupon.getExpiresAtUtc() != null && Instant.now().isAfter(coupon.getExpiresAtUtc())) {
-            throw new IllegalArgumentException("Este cupom expirou em " + formatShortDate(coupon.getExpiresAtUtc()) + ".");
+        for (int attempt = 0; attempt < 16; attempt++) {
+            StringBuilder sb = new StringBuilder("FRM-");
+            if (!cleanPrefix.isEmpty()) {
+                sb.append(cleanPrefix).append("-");
+            }
+            for (int i = 0; i < 8; i++) {
+                sb.append(COUPON_ALPHABET.charAt(SECURE_RANDOM.nextInt(COUPON_ALPHABET.length())));
+            }
+            String candidate = sb.toString();
+            if (couponRepository.findByCodeIgnoreCase(candidate).isEmpty()) {
+                return candidate;
+            }
         }
-        if (coupon.getMaxRedemptions() != null && coupon.getCurrentRedemptions() >= coupon.getMaxRedemptions()) {
-            throw new IllegalArgumentException("Este cupom atingiu o limite máximo de resgates.");
+        return "FRM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+    }
+
+    private void validateCouponEligibility(CouponEntity coupon, User user, String planId, Instant now) {
+        if (!coupon.isActive() || coupon.isExpired(now) || coupon.isExhausted()) {
+            throw new IllegalArgumentException("Código promocional inválido, expirado ou esgotado.");
+        }
+        String restrictedEmail = coupon.getRestrictedToEmail();
+        if (restrictedEmail != null && !restrictedEmail.isBlank()) {
+            String userEmail = user.getEmail() != null ? user.getEmail().trim() : "";
+            if (!restrictedEmail.trim().equalsIgnoreCase(userEmail)) {
+                throw new IllegalArgumentException("Código promocional inválido, expirado ou indisponível para esta conta.");
+            }
+        }
+        if (coupon.isFirstTimeOnly() && hasPriorPaidSubscriptionHistory(user.getId())) {
+            throw new IllegalArgumentException("Este código promocional é exclusivo para a primeira assinatura no Forma Pro.");
         }
         if (coupon.getApplicablePlanId() != null && !coupon.getApplicablePlanId().isBlank()
             && !coupon.getApplicablePlanId().equalsIgnoreCase(planId)) {
             throw new IllegalArgumentException("Cupom válido apenas para o plano " + coupon.getApplicablePlanId() + ".");
         }
-        long userCount = redemptionRepository.countByCouponIdAndUserId(coupon.getId(), userId);
+        long userCount = redemptionRepository.countByCouponIdAndUserId(coupon.getId(), user.getId());
         if (userCount >= coupon.getPerUserLimit()) {
-            throw new IllegalArgumentException("Você já atingiu o limite de uso deste cupom na sua conta.");
+            throw new IllegalArgumentException("Você já atingiu o limite de uso deste código promocional na sua conta.");
         }
     }
 
-    private void applyCouponFields(CouponEntity c, CreateOrUpdateCouponRequest req) {
+    private boolean hasPriorPaidSubscriptionHistory(UUID userId) {
+        boolean hasPaidEntry = paymentEntryRepository.findByUserIdOrderByCreatedAtUtcDesc(userId).stream()
+            .anyMatch(e -> "PAID".equalsIgnoreCase(e.getStatus())
+                && e.getNetAmountCents() > 0
+                && ("SUBSCRIPTION_CHARGE".equalsIgnoreCase(e.getEntryType())
+                    || "MANUAL_INCOME".equalsIgnoreCase(e.getEntryType())));
+        if (hasPaidEntry) {
+            return true;
+        }
+        return subscriptionRepository.findByUserId(userId)
+            .map(s -> "ACTIVE".equalsIgnoreCase(s.getStatus()) && s.getPriceCents() > 0)
+            .orElse(false);
+    }
+
+    private void consumeCouponAtomically(
+        CouponEntity lockedCoupon,
+        User user,
+        UUID subscriptionId,
+        String benefitSummary,
+        Instant now
+    ) {
+        lockedCoupon.setCurrentRedemptions(lockedCoupon.getCurrentRedemptions() + 1);
+        if (lockedCoupon.isExhausted()) {
+            lockedCoupon.setActive(false);
+            if (lockedCoupon.getExhaustedAtUtc() == null) {
+                lockedCoupon.setExhaustedAtUtc(now);
+            }
+        }
+        couponRepository.save(lockedCoupon);
+
+        CouponRedemptionEntity redemption = new CouponRedemptionEntity();
+        redemption.setCouponId(lockedCoupon.getId());
+        redemption.setCouponCode(lockedCoupon.getCode());
+        redemption.setUserId(user.getId());
+        redemption.setUserEmail(user.getEmail());
+        redemption.setSubscriptionId(subscriptionId);
+        redemption.setBenefitSummary(benefitSummary);
+        redemption.setRedeemedAtUtc(now);
+        redemptionRepository.save(redemption);
+    }
+
+    private void applyCouponFields(CouponEntity c, CreateOrUpdateCouponRequest req, boolean isCreate) {
         if (req.description() != null) c.setDescription(req.description().trim());
         String type = (req.couponType() != null && !req.couponType().isBlank())
             ? req.couponType().trim().toUpperCase(Locale.ROOT)
@@ -1402,11 +2143,83 @@ public class SubscriptionBillingService {
         c.setDiscountPercent("PERCENT_DISCOUNT".equals(type) ? clampInt(req.discountPercent(), 1, 100, 10) : null);
         c.setDiscountCents("FIXED_CENTS_DISCOUNT".equals(type) ? clampInt(req.discountCents(), 100, 1000000, 500) : null);
         c.setFreePeriodDays("FREE_PERIOD_DAYS".equals(type) ? clampInt(req.freePeriodDays(), 1, 3650, 7) : null);
-        c.setApplicablePlanId(req.applicablePlanId() != null && !req.applicablePlanId().isBlank() ? req.applicablePlanId().trim() : null);
-        c.setMaxRedemptions(req.maxRedemptions() != null && req.maxRedemptions() > 0 ? req.maxRedemptions() : null);
-        c.setPerUserLimit(req.perUserLimit() != null && req.perUserLimit() > 0 ? req.perUserLimit() : 1);
-        c.setExpiresAtUtc(req.expiresAtUtc() != null && !req.expiresAtUtc().isBlank() ? Instant.parse(req.expiresAtUtc().trim()) : null);
-        if (req.active() != null) c.setActive(req.active());
+        if (req.applicablePlanId() != null) {
+            c.setApplicablePlanId(!req.applicablePlanId().isBlank() ? req.applicablePlanId().trim() : null);
+        } else if (isCreate) {
+            c.setApplicablePlanId(null);
+        }
+
+        if (req.maxRedemptions() != null && (req.maxRedemptions() < 1 || req.maxRedemptions() > MAX_COUPON_GLOBAL_LIMIT)) {
+            throw new IllegalArgumentException("Todo cupom deve ter limite de uso finito entre 1 e 10.000 resgates.");
+        }
+        int resolvedMax;
+        if (req.maxRedemptions() != null) {
+            resolvedMax = req.maxRedemptions();
+        } else if (isCreate) {
+            resolvedMax = 1; // Padrão enterprise: uso único individual
+        } else {
+            resolvedMax = c.getMaxRedemptions();
+        }
+        if (!isCreate && resolvedMax < Math.max(1, c.getCurrentRedemptions())) {
+            throw new IllegalArgumentException(
+                "O limite máximo não pode ser menor que os resgates já realizados (" + c.getCurrentRedemptions() + ")."
+            );
+        }
+        c.setMaxRedemptions(resolvedMax);
+
+        int resolvedPerUser;
+        if (req.perUserLimit() != null) {
+            if (req.perUserLimit() < 1 || req.perUserLimit() > resolvedMax) {
+                throw new IllegalArgumentException("O limite por usuário deve ficar entre 1 e o limite global (" + resolvedMax + ").");
+            }
+            resolvedPerUser = req.perUserLimit();
+        } else if (isCreate) {
+            resolvedPerUser = 1;
+        } else {
+            resolvedPerUser = Math.min(c.getPerUserLimit(), resolvedMax);
+        }
+        c.setPerUserLimit(resolvedPerUser);
+
+        if (req.restrictedToEmail() != null) {
+            String trimmedEmail = req.restrictedToEmail().trim().toLowerCase(Locale.ROOT);
+            if (!trimmedEmail.isEmpty()) {
+                if (!trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
+                    throw new IllegalArgumentException("Informe um e-mail destinatário válido ou deixe em branco.");
+                }
+                c.setRestrictedToEmail(trimmedEmail);
+            } else {
+                c.setRestrictedToEmail(null);
+            }
+        } else if (isCreate) {
+            c.setRestrictedToEmail(null);
+        }
+
+        if (req.firstTimeOnly() != null) {
+            c.setFirstTimeOnly(req.firstTimeOnly());
+        } else if (isCreate) {
+            c.setFirstTimeOnly(false);
+        }
+
+        if (req.expiresAtUtc() != null) {
+            c.setExpiresAtUtc(!req.expiresAtUtc().isBlank() ? Instant.parse(req.expiresAtUtc().trim()) : null);
+        } else if (isCreate) {
+            c.setExpiresAtUtc(null);
+        }
+
+        if (req.active() != null) {
+            c.setActive(req.active());
+        } else if (isCreate) {
+            c.setActive(true);
+        }
+
+        if (c.isExhausted()) {
+            c.setActive(false);
+            if (c.getExhaustedAtUtc() == null) {
+                c.setExhaustedAtUtc(Instant.now());
+            }
+        } else {
+            c.setExhaustedAtUtc(null);
+        }
     }
 
     private static int clampInt(Integer val, int min, int max, int fallback) {
@@ -1564,5 +2377,66 @@ public class SubscriptionBillingService {
         if (node == null || !node.hasNonNull(field)) return null;
         String val = node.path(field).asText("").trim();
         return val.isEmpty() ? null : val;
+    }
+
+    private static boolean isActiveCourtesyOrFreeGrant(UserSubscriptionEntity sub, Instant now) {
+        if (sub == null) return false;
+        String st = sub.getStatus().toUpperCase(Locale.ROOT);
+        if (!"ACTIVE".equals(st) && !"TRIALING".equals(st)) {
+            return false;
+        }
+        if (sub.getCurrentPeriodEndUtc() != null && !sub.getCurrentPeriodEndUtc().isAfter(now)) {
+            return false;
+        }
+        String src = sub.getSource().toUpperCase(Locale.ROOT);
+        if ("COUPON_FREE_PERIOD".equals(src)) {
+            return true;
+        }
+        if ("ADMIN_MANUAL".equals(src) && sub.getPriceCents() <= 0) {
+            return true;
+        }
+        return sub.getPriceCents() <= 0 && !sub.isAutoRenew();
+    }
+
+    private static boolean isCourtesyOrZeroValueEntry(PaymentEntryEntity entry) {
+        if (entry == null) return true;
+        if (entry.getNetAmountCents() <= 0) return true;
+        String method = entry.getPaymentMethod() != null ? entry.getPaymentMethod().toUpperCase(Locale.ROOT) : "";
+        String type = entry.getEntryType() != null ? entry.getEntryType().toUpperCase(Locale.ROOT) : "";
+        return "COURTESY".equals(method) || "COUPON".equals(method) || "COUPON_TRIAL_GRANT".equals(type);
+    }
+
+    private void publishUserTierActivity(User user, String eventName) {
+        if (user == null) return;
+        eventPublisherService.publishUserActivity(
+            eventName,
+            user.getEmail(),
+            user.getName(),
+            user.getAuthProvider(),
+            userRepository.count()
+        );
+    }
+
+    private static <T> CompletableFuture<T> supplyParallelOrInline(
+        Supplier<T> supplier,
+        ExecutorService executor,
+        Semaphore limiter
+    ) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            return CompletableFuture.completedFuture(supplier.get());
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            boolean acquired = false;
+            try {
+                limiter.acquire();
+                acquired = true;
+                return supplier.get();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return supplier.get();
+            } finally {
+                if (acquired) limiter.release();
+            }
+        }, executor);
     }
 }

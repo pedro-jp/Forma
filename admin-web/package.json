@@ -1,7 +1,7 @@
 {
   "name": "forma-admin-vite",
   "version": "1.0.0",
-  "description": "Forma Real-time Admin Dashboard built with Vite & React",
+  "description": "Forma Console Administrativo em Tempo Real",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -12,7 +12,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",
